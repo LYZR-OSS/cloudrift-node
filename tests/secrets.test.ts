@@ -10,7 +10,7 @@ import { mockClient } from "aws-sdk-client-mock";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SecretError, SecretNotFoundError, SecretPermissionError } from "../src/core/errors.js";
-import { getSecrets } from "../src/secrets/index.js";
+import { AWSSecretsManagerBackend, getSecrets } from "../src/secrets/index.js";
 
 const smMock = mockClient(SecretsManagerClient);
 const credentialProviderMock = vi.hoisted(() => ({
@@ -193,6 +193,14 @@ describe("AWSSecretsManagerBackend", () => {
 });
 
 describe("getSecrets factory", () => {
+  it("normalizes provider values from config", async () => {
+    const backend = await getSecrets(" AWS_SECRETS_MANAGER ", {
+      region: "us-east-1",
+    });
+    expect(backend).toBeInstanceOf(AWSSecretsManagerBackend);
+    await backend.close();
+  });
+
   it("throws for an unknown provider", async () => {
     await expect(
       getSecrets("gcp_secret_manager" as unknown as "aws_secrets_manager", { project: "my-proj" }),

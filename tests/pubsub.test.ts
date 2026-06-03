@@ -7,7 +7,7 @@ import {
   ListTopicsCommand,
 } from "@aws-sdk/client-sns";
 
-import { getPubsub, type AWSSNSBackend } from "../src/pubsub/index.js";
+import { AWSSNSBackend, getPubsub } from "../src/pubsub/index.js";
 import { PublishError, CloudRiftError } from "../src/core/errors.js";
 
 const TOPIC = "arn:aws:sns:us-east-1:123456789012:test-topic";
@@ -150,6 +150,15 @@ describe("AWSSNSBackend.healthCheck", () => {
 });
 
 describe("getPubsub factory", () => {
+  it("normalizes provider values from config", async () => {
+    const backend = await getPubsub(" SNS ", {
+      topicArn: "arn:aws:sns:us-east-1:123456789012:test-topic",
+      region: "us-east-1",
+    });
+    expect(backend).toBeInstanceOf(AWSSNSBackend);
+    await backend.close();
+  });
+
   it("throws CloudRiftError for an unknown provider", async () => {
     await expect(getPubsub("gcp_pubsub" as never, { project: "my-proj" })).rejects.toBeInstanceOf(
       CloudRiftError,

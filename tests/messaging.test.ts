@@ -483,6 +483,25 @@ describe("getQueue", () => {
     await b.close();
   });
 
+  it("normalizes provider values from config", async () => {
+    const sqs = await getQueue(" SQS ", { queueUrl: QUEUE_URL, region: "us-east-1" });
+    expect(sqs).toBeInstanceOf(AWSSQSBackend);
+    await sqs.close();
+
+    const azure = await getQueue(" AZURE_BUS ", {
+      fullyQualifiedNamespace: "ns.servicebus.windows.net",
+      queueName: "q",
+    });
+    expect(azure).toBeInstanceOf(AzureServiceBusBackend);
+    await azure.close();
+  });
+
+  it("rejects fuzzy provider spellings from config", () => {
+    expect(() => getQueue(" AZURE SERVICE BUS ", { queueUrl: "x" })).toThrow(
+      /Unknown messaging provider/,
+    );
+  });
+
   it("throws on an unknown provider", () => {
     expect(() => getQueue("rabbitmq" as never, { queueUrl: "x" })).toThrow(
       /Unknown messaging provider/,

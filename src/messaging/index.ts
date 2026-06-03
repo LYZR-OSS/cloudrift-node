@@ -1,4 +1,4 @@
-import { CloudRiftError } from "../core/errors.js";
+import { normalizeChoice } from "../core/providers.js";
 import type { MessagingBackend } from "./base.js";
 import {
   AWSSQSBackend,
@@ -19,6 +19,8 @@ export { AzureServiceBusBackend } from "./azureBus.js";
 
 export type QueueProvider = "sqs" | "azure_service_bus";
 
+const QUEUE_PROVIDERS = ["sqs", "azure_service_bus"] as const satisfies readonly QueueProvider[];
+
 /**
  * Factory to instantiate a messaging backend.
  *
@@ -31,45 +33,43 @@ export type QueueProvider = "sqs" | "azure_service_bus";
  * @param options  Provider-specific config (camelCase keys).
  */
 export function getQueue(
-  provider: QueueProvider,
+  provider: QueueProvider | string,
   options: Record<string, unknown>,
 ): Promise<MessagingBackend> {
-  if (provider === "sqs") {
-    if ("awsAccessKeyId" in options) {
-      return Promise.resolve(
-        AWSSQSBackend.fromAccessKey(options as unknown as SqsAccessKeyOptions),
-      );
-    }
-    if ("profileName" in options) {
-      return Promise.resolve(AWSSQSBackend.fromProfile(options as unknown as SqsProfileOptions));
-    }
-    return Promise.resolve(AWSSQSBackend.fromIamRole(options as unknown as SqsIamRoleOptions));
-  }
+  const normalizedProvider = normalizeChoice("messaging provider", provider, QUEUE_PROVIDERS, {
+    azure_bus: "azure_service_bus",
+  });
 
-  if (provider === "azure_service_bus") {
-    if ("connectionString" in options) {
+  switch (normalizedProvider) {
+    case "sqs":
+      if ("awsAccessKeyId" in options) {
+        return Promise.resolve(
+          AWSSQSBackend.fromAccessKey(options as unknown as SqsAccessKeyOptions),
+        );
+      }
+      if ("profileName" in options) {
+        return Promise.resolve(AWSSQSBackend.fromProfile(options as unknown as SqsProfileOptions));
+      }
+      return Promise.resolve(AWSSQSBackend.fromIamRole(options as unknown as SqsIamRoleOptions));
+    case "azure_service_bus":
+      if ("connectionString" in options) {
+        return Promise.resolve(
+          AzureServiceBusBackend.fromConnectionString(
+            options as unknown as AzureBusConnectionStringOptions,
+          ),
+        );
+      }
+      if ("clientSecret" in options) {
+        return Promise.resolve(
+          AzureServiceBusBackend.fromServicePrincipal(
+            options as unknown as AzureBusServicePrincipalOptions,
+          ),
+        );
+      }
       return Promise.resolve(
-        AzureServiceBusBackend.fromConnectionString(
-          options as unknown as AzureBusConnectionStringOptions,
+        AzureServiceBusBackend.fromManagedIdentity(
+          options as unknown as AzureBusManagedIdentityOptions,
         ),
       );
-    }
-    if ("clientSecret" in options) {
-      return Promise.resolve(
-        AzureServiceBusBackend.fromServicePrincipal(
-          options as unknown as AzureBusServicePrincipalOptions,
-        ),
-      );
-    }
-    return Promise.resolve(
-      AzureServiceBusBackend.fromManagedIdentity(
-        options as unknown as AzureBusManagedIdentityOptions,
-      ),
-    );
   }
-
-  throw new CloudRiftError(
-    `Unknown messaging provider: ${JSON.stringify(provider)}. ` +
-      "Choose 'sqs' or 'azure_service_bus'.",
-  );
 }

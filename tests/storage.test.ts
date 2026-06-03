@@ -354,6 +354,18 @@ describe("getStorage dispatch", () => {
     expect(backend).toBeInstanceOf(AWSS3Backend);
   });
 
+  it("normalizes provider values from config", async () => {
+    const backend = await getStorage(" S3 ", { bucket: "b", region: "us-west-2" });
+    expect(backend).toBeInstanceOf(AWSS3Backend);
+
+    const client = await getStorageClient(" S3 ", { region: "us-west-2" });
+    expect(client).toBeInstanceOf(AWSS3Client);
+  });
+
+  it("rejects blank provider values from config", async () => {
+    await expect(getStorage(" ", { bucket: "x" })).rejects.toThrow(/Unknown storage provider/);
+  });
+
   it("throws CloudRiftError for unknown provider", async () => {
     await expect(getStorage("gcs" as never, { bucket: "x" })).rejects.toBeInstanceOf(
       CloudRiftError,

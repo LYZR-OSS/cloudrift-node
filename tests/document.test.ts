@@ -228,6 +228,11 @@ describe("cosmos", () => {
 });
 
 describe("dispatch + errors", () => {
+  it("normalizes provider values from config", async () => {
+    await getMongodb(" COSMOS ", { account: "acct", accountKey: "key" });
+    expect(last().uri).toContain("acct.mongo.cosmos.azure.com:10255");
+  });
+
   it("unknown provider throws CloudRiftError", async () => {
     await expect(getMongodb("dynamodb" as never, { uri: "x" })).rejects.toThrow(
       /Unknown document DB provider/,

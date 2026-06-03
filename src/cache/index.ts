@@ -7,6 +7,7 @@
  * static constructors. Unknown provider or method raises `CloudRiftError`.
  */
 import { CloudRiftError } from "../core/errors.js";
+import { normalizeChoice } from "../core/providers.js";
 import type { CacheBackend } from "./base.js";
 import { StandaloneRedisBackend } from "./redisStandalone.js";
 import { AWSElastiCacheBackend } from "./redisElasticache.js";
@@ -30,6 +31,12 @@ export type CacheAuthMethod =
   | "from_access_key"
   | "from_managed_identity"
   | "from_service_principal";
+
+const CACHE_PROVIDERS = [
+  "redis",
+  "elasticache",
+  "azure_redis",
+] as const satisfies readonly CacheProvider[];
 
 /** snake_case auth-method config value → camelCase static constructor name. */
 const AUTH_METHOD_TO_FACTORY: Record<string, string> = {
@@ -57,31 +64,35 @@ export async function getCache(
   authMethod: CacheAuthMethod | string,
   options: Record<string, unknown>,
 ): Promise<CacheBackend> {
+  const normalizedProvider = normalizeChoice("cache provider", provider, CACHE_PROVIDERS);
+  const normalizedAuthMethod = authMethod.trim().toLowerCase();
+
   let backend:
     | typeof StandaloneRedisBackend
     | typeof AWSElastiCacheBackend
     | typeof AzureRedisCacheBackend;
 
-  if (provider === "redis") {
-    backend = StandaloneRedisBackend;
-  } else if (provider === "elasticache") {
-    backend = AWSElastiCacheBackend;
-  } else if (provider === "azure_redis") {
-    backend = AzureRedisCacheBackend;
-  } else {
-    throw new CloudRiftError(
-      `Unknown cache provider: ${JSON.stringify(provider)}. ` +
-        "Choose 'redis', 'elasticache', or 'azure_redis'.",
-    );
+  switch (normalizedProvider) {
+    case "redis":
+      backend = StandaloneRedisBackend;
+      break;
+    case "elasticache":
+      backend = AWSElastiCacheBackend;
+      break;
+    case "azure_redis":
+      backend = AzureRedisCacheBackend;
+      break;
   }
 
-  const factoryName = AUTH_METHOD_TO_FACTORY[authMethod];
+  const factoryName = AUTH_METHOD_TO_FACTORY[normalizedAuthMethod];
   const factory = factoryName
     ? (backend as unknown as Record<string, unknown>)[factoryName]
     : undefined;
 
   if (typeof factory !== "function") {
-    throw new CloudRiftError(`${backend.name} has no auth method ${JSON.stringify(authMethod)}.`);
+    throw new CloudRiftError(
+      `${backend.name} has no auth method ${JSON.stringify(normalizedAuthMethod)}.`,
+    );
   }
 
   return (factory as CacheBackendFactory).call(backend, options);

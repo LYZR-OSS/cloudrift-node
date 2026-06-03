@@ -1,4 +1,4 @@
-import { CloudRiftError } from "../core/errors.js";
+import { normalizeChoice } from "../core/providers.js";
 import type { SecretBackend } from "./base.js";
 import {
   AWSSecretsManagerBackend,
@@ -20,6 +20,11 @@ export { AzureKeyVaultBackend } from "./azureKeyvault.js";
 
 export type SecretsProvider = "aws_secrets_manager" | "azure_keyvault";
 
+const SECRETS_PROVIDERS = [
+  "aws_secrets_manager",
+  "azure_keyvault",
+] as const satisfies readonly SecretsProvider[];
+
 /**
  * Factory to instantiate a secret management backend.
  *
@@ -30,37 +35,31 @@ export type SecretsProvider = "aws_secrets_manager" | "azure_keyvault";
  * @param options  Provider-specific config.
  */
 export async function getSecrets(
-  provider: SecretsProvider,
+  provider: SecretsProvider | string,
   options: Record<string, unknown>,
 ): Promise<SecretBackend> {
-  if (provider === "aws_secrets_manager") {
-    if ("awsAccessKeyId" in options) {
-      return AWSSecretsManagerBackend.fromAccessKey(options as unknown as AwsAccessKeyOptions);
-    }
-    if ("profileName" in options) {
-      return AWSSecretsManagerBackend.fromProfile(options as unknown as AwsProfileOptions);
-    }
-    return AWSSecretsManagerBackend.fromIamRole(options as unknown as AwsIamRoleOptions);
-  }
-
-  if (provider === "azure_keyvault") {
-    if ("clientSecret" in options) {
-      return AzureKeyVaultBackend.fromServicePrincipal(
-        options as unknown as {
-          vaultUrl: string;
-          tenantId: string;
-          clientId: string;
-          clientSecret: string;
-        },
+  switch (normalizeChoice("secrets provider", provider, SECRETS_PROVIDERS)) {
+    case "aws_secrets_manager":
+      if ("awsAccessKeyId" in options) {
+        return AWSSecretsManagerBackend.fromAccessKey(options as unknown as AwsAccessKeyOptions);
+      }
+      if ("profileName" in options) {
+        return AWSSecretsManagerBackend.fromProfile(options as unknown as AwsProfileOptions);
+      }
+      return AWSSecretsManagerBackend.fromIamRole(options as unknown as AwsIamRoleOptions);
+    case "azure_keyvault":
+      if ("clientSecret" in options) {
+        return AzureKeyVaultBackend.fromServicePrincipal(
+          options as unknown as {
+            vaultUrl: string;
+            tenantId: string;
+            clientId: string;
+            clientSecret: string;
+          },
+        );
+      }
+      return AzureKeyVaultBackend.fromManagedIdentity(
+        options as unknown as { vaultUrl: string; clientId?: string },
       );
-    }
-    return AzureKeyVaultBackend.fromManagedIdentity(
-      options as unknown as { vaultUrl: string; clientId?: string },
-    );
   }
-
-  throw new CloudRiftError(
-    `Unknown secrets provider: ${String(provider)}. ` +
-      "Choose 'aws_secrets_manager' or 'azure_keyvault'.",
-  );
 }

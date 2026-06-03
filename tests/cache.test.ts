@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 
 import { BaseRedisBackend } from "../src/cache/redisBase.js";
 import { getCache } from "../src/cache/index.js";
+import { StandaloneRedisBackend } from "../src/cache/redisStandalone.js";
 import { generateElastiCacheIamToken } from "../src/cache/redisElasticache.js";
 import { CloudRiftError } from "../src/core/errors.js";
 
@@ -237,6 +238,18 @@ describe("BaseRedisBackend ops", () => {
 });
 
 describe("getCache factory dispatch", () => {
+  it("normalizes provider and auth method values from config", async () => {
+    const cache = await getCache(" REDIS ", " FROM_URL ", { url: "redis://localhost:6379" });
+    expect(cache).toBeInstanceOf(StandaloneRedisBackend);
+    await cache.close();
+  });
+
+  it("rejects blank provider values from config", async () => {
+    await expect(getCache(" ", "from_url", { url: "redis://localhost" })).rejects.toThrow(
+      /Unknown cache provider/,
+    );
+  });
+
   it("throws CloudRiftError on unknown provider", async () => {
     await expect(
       getCache("gcp_memorystore", "from_url", { url: "redis://localhost" }),

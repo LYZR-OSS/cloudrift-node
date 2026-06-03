@@ -13,11 +13,13 @@
  */
 import type { MongoClient } from "mongodb";
 
-import { CloudRiftError } from "../core/errors.js";
+import { normalizeChoice } from "../core/providers.js";
 import { connectCredentials, connectTlsCert, connectUri } from "./documentdb.js";
 import { connectAccountKey, connectConnectionString } from "./cosmos.js";
 
 export type DocumentProvider = "documentdb" | "cosmos";
+
+const DOCUMENT_PROVIDERS = ["documentdb", "cosmos"] as const satisfies readonly DocumentProvider[];
 
 export {
   connectCredentials,
@@ -46,29 +48,24 @@ function has(options: Record<string, unknown>, key: string): boolean {
  * @param options  Provider-specific config.
  */
 export async function getMongodb(
-  provider: DocumentProvider,
+  provider: DocumentProvider | string,
   options: Record<string, unknown>,
 ): Promise<MongoClient> {
-  if (provider === "documentdb") {
-    if (has(options, "uri")) {
-      return connectUri(options as Parameters<typeof connectUri>[0]);
-    }
-    if (has(options, "tlsCertKeyFile")) {
-      return connectTlsCert(options as unknown as Parameters<typeof connectTlsCert>[0]);
-    }
-    return connectCredentials(options as unknown as Parameters<typeof connectCredentials>[0]);
+  switch (normalizeChoice("document DB provider", provider, DOCUMENT_PROVIDERS)) {
+    case "documentdb":
+      if (has(options, "uri")) {
+        return connectUri(options as Parameters<typeof connectUri>[0]);
+      }
+      if (has(options, "tlsCertKeyFile")) {
+        return connectTlsCert(options as unknown as Parameters<typeof connectTlsCert>[0]);
+      }
+      return connectCredentials(options as unknown as Parameters<typeof connectCredentials>[0]);
+    case "cosmos":
+      if (has(options, "connectionString")) {
+        return connectConnectionString(
+          options as unknown as Parameters<typeof connectConnectionString>[0],
+        );
+      }
+      return connectAccountKey(options as unknown as Parameters<typeof connectAccountKey>[0]);
   }
-
-  if (provider === "cosmos") {
-    if (has(options, "connectionString")) {
-      return connectConnectionString(
-        options as unknown as Parameters<typeof connectConnectionString>[0],
-      );
-    }
-    return connectAccountKey(options as unknown as Parameters<typeof connectAccountKey>[0]);
-  }
-
-  throw new CloudRiftError(
-    `Unknown document DB provider: ${String(provider)}. Choose 'documentdb' or 'cosmos'.`,
-  );
 }
