@@ -217,3 +217,38 @@ Definition of done per module: `tsc --noEmit` clean, vitest green, public API ma
   the current SDK major at implementation time.
 - Python's `__init__.py` re-exports everything at top level; TS mirrors this in the root
   entry plus per-domain subpath exports.
+
+### 7.1 Parity-review findings — deferred minors (intentional divergences)
+
+The finalization pass fixed all critical/major findings and the cheap minors. The
+following minor divergences are **deliberately retained**; they are either
+spec-sanctioned (`ARCHITECTURE.md`) or the TS behavior is the safer/more idiomatic
+choice. Recorded here for awareness:
+
+- **Broader error-catch scope (messaging SQS `sqs.ts`, Azure `azureBus.ts`).** Python
+  wraps only `ClientError` / `HttpResponseError` and lets non-SDK errors (e.g. a
+  `JSON.parse`/`json.loads` failure on a malformed body in `receive()`) propagate raw.
+  TS funnels every caught error through `mapError`/`mapReceiveError`, so a body-parse
+  failure surfaces as `MessagingError` instead of a raw `SyntaxError`. This matches the
+  `ARCHITECTURE.md` error-table rule "anything unmapped in domain X → domain base
+  error", so it is kept intentionally. Low impact (only affects malformed-payload
+  failure typing).
+- **Cache `close()` uses ioredis `quit()` (`redisBase.ts`).** Python `_RedisMixin.close()`
+  calls `aclose()` (pool teardown, no guaranteed server QUIT). `quit()` is the graceful
+  analog and issues an actual QUIT; it can block/fail on a half-open socket where
+  `aclose()` would not. Kept as the documented graceful-close choice.
+- **Cache factory error type (`cache/index.ts`).** Python `get_cache` raises `ValueError`
+  for unknown provider/auth-method; TS throws `CloudRiftError`. Sanctioned by
+  `ARCHITECTURE.md` (single CloudRift error tree) and asserted by `cache.test.ts`.
+- **Cache `hgetall` key type (`redisBase.ts`).** Python returns `dict[bytes, bytes]`; TS
+  returns `Record<string, Buffer>` (string field names) per `ARCHITECTURE.md` §4.5.
+  Non-UTF-8 field-name bytes would round-trip differently. Idiomatic for JS object keys.
+- **Empty-varargs `delete()` / `hdel()` (`redisBase.ts`).** TS short-circuits to `0` on
+  zero keys/fields; Python forwards the empty splat and redis-py raises. The TS guard is
+  intentional and asserted by `cache.test.ts`.
+- **Azure Key Vault `getSecret` null coercion (`azureKeyvault.ts`).** Python returns
+  `secret.value` (may be `None`); TS returns `secret.value ?? ""`. Python does NOT error
+  on a null value, so hard-failing in TS would diverge *more*; the `?? ""` coercion is
+  the type-safe analog for the `Promise<string>` contract. (Note: AWS Secrets Manager
+  `getSecret` was changed to hard-fail when `SecretString` is undefined, because there
+  Python *does* hard-fail via `KeyError`.)

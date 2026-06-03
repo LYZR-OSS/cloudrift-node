@@ -256,7 +256,11 @@ export class AWSSNSBackend extends PubSubBackend {
     if (code === "NotFound" || code === "NotFoundException") {
       return new TopicNotFoundError(`Topic not found: ${topic}`, { cause: err });
     }
-    if (code === "AuthorizationError" || code === "AccessDenied") {
+    if (
+      code === "AuthorizationError" ||
+      code === "AuthorizationErrorException" ||
+      code === "AccessDenied"
+    ) {
       return new PubSubError(`Access denied for topic: ${topic}`, { cause: err });
     }
     return new PubSubError(errorMessage(err), { cause: err });
@@ -280,6 +284,12 @@ function errorCode(err: unknown): string | undefined {
   const name = (err as { name?: unknown }).name;
   if (typeof name === "string") {
     return name;
+  }
+  // AWS SDK v3 surfaces the service error code on `Code`; botocore-style
+  // lowercase `code` is also tolerated for compatibility.
+  const upperCode = (err as { Code?: unknown }).Code;
+  if (typeof upperCode === "string") {
+    return upperCode;
   }
   const code = (err as { code?: unknown }).code;
   return typeof code === "string" ? code : undefined;

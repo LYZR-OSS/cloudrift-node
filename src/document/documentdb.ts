@@ -9,7 +9,7 @@
  */
 import type { MongoClient, MongoClientOptions } from "mongodb";
 
-import { DocumentConnectionError } from "../core/errors.js";
+import { CloudRiftError, DocumentConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 
 /** Constructor signature for the native `mongodb` `MongoClient`. */
@@ -28,6 +28,24 @@ export interface PoolOptions {
 
 const DEFAULT_MAX_POOL_SIZE = 100;
 const DEFAULT_MIN_POOL_SIZE = 0;
+
+/**
+ * Byte-for-byte equivalent of Python's `urllib.parse.quote_plus`, used by the
+ * Python source of record to encode credentials into MongoDB URIs.
+ *
+ * `encodeURIComponent` differs from `quote_plus` for several characters that
+ * are legal in Mongo credentials: it leaves `! * ' ( )` unescaped (quote_plus
+ * percent-encodes them) and encodes a space as `%20` (quote_plus uses `+`).
+ * A literal `+` in a URI userinfo is NOT decoded back to a space, so a password
+ * containing a space would otherwise authenticate differently between the two
+ * ports. This helper reproduces quote_plus exactly so the constructed URI
+ * matches the Python output.
+ */
+export function quotePlus(value: string): string {
+  return encodeURIComponent(value)
+    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/%20/g, "+");
+}
 
 /**
  * Test seam: an injectable `MongoClient` constructor. When unset, the real
@@ -65,11 +83,14 @@ async function construct(
   uri: string,
   options: MongoClientOptions,
 ): Promise<MongoClient> {
+  // Resolve the constructor outside the try so a missing-package CloudRiftError
+  // (the actionable "install mongodb ..." hint) propagates unchanged instead of
+  // being re-wrapped as a DocumentConnectionError.
+  const Ctor = await resolveCtor();
   try {
-    const Ctor = await resolveCtor();
     return new Ctor(uri, options);
   } catch (err) {
-    if (err instanceof DocumentConnectionError) {
+    if (err instanceof CloudRiftError) {
       throw err;
     }
     throw new DocumentConnectionError(
@@ -108,7 +129,7 @@ export async function connectCredentials(
   } & PoolOptions,
 ): Promise<MongoClient> {
   const { host, port, username, password, tls = true, tlsCaFile } = opts;
-  const uri = `mongodb://${encodeURIComponent(username)}:${encodeURIComponent(
+  const uri = `mongodb://${quotePlus(username)}:${quotePlus(
     password,
   )}@${host}:${port}/`;
   const options: MongoClientOptions = {
@@ -133,7 +154,7 @@ export async function connectTlsCert(
   } & PoolOptions,
 ): Promise<MongoClient> {
   const { host, port, username, password, tlsCertKeyFile, tlsCaFile } = opts;
-  const uri = `mongodb://${encodeURIComponent(username)}:${encodeURIComponent(
+  const uri = `mongodb://${quotePlus(username)}:${quotePlus(
     password,
   )}@${host}:${port}/`;
   const options: MongoClientOptions = {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import {
   SQSClient,
@@ -12,7 +12,8 @@ import {
 
 import { getQueue } from "../src/messaging/index.js";
 import { AWSSQSBackend } from "../src/messaging/sqs.js";
-import { MessageSendError } from "../src/core/errors.js";
+import { AzureServiceBusBackend } from "../src/messaging/azureBus.js";
+import { MessageSendError, MessagingError } from "../src/core/errors.js";
 import type { MessagingBackend } from "../src/messaging/base.js";
 
 const QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue";
@@ -177,6 +178,255 @@ describe("AWSSQSBackend", () => {
     sqsMock.on(GetQueueAttributesCommand).rejects(new Error("nope"));
 
     expect(await backend.healthCheck()).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Azure Service Bus — driven through a mocked @azure/service-bus SDK   */
+/* ------------------------------------------------------------------ */
+
+// A controllable fake receiver. Each receiveMessages() call drains one batch
+// from a queued script of message batches.
+class FakeReceiver {
+  closed = false;
+  completed: unknown[] = [];
+  private batches: Array<Array<Record<string, unknown>>>;
+
+  constructor(batches: Array<Array<Record<string, unknown>>>) {
+    this.batches = batches;
+  }
+
+  async receiveMessages(): Promise<Array<Record<string, unknown>>> {
+    return this.batches.shift() ?? [];
+  }
+
+  async completeMessage(msg: unknown): Promise<void> {
+    this.completed.push(msg);
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+class FakeSender {
+  closed = false;
+  sent: unknown[] = [];
+  scheduled: unknown[] = [];
+
+  async sendMessages(m: unknown): Promise<void> {
+    this.sent.push(m);
+  }
+
+  async scheduleMessages(m: unknown): Promise<void> {
+    this.scheduled.push(m);
+  }
+
+  async createMessageBatch(): Promise<{
+    messages: unknown[];
+    tryAddMessage(m: unknown): boolean;
+  }> {
+    const messages: unknown[] = [];
+    return {
+      messages,
+      tryAddMessage(m: unknown) {
+        messages.push(m);
+        return true;
+      },
+    };
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+// Module-level harness the mocked SDK reads from.
+const sbHarness: {
+  receivers: FakeReceiver[];
+  senders: FakeSender[];
+  receiveScript: Array<Array<Record<string, unknown>>>;
+  lastClientArgs: unknown[];
+  clientClosed: boolean;
+} = {
+  receivers: [],
+  senders: [],
+  receiveScript: [],
+  lastClientArgs: [],
+  clientClosed: false,
+};
+
+vi.mock("@azure/service-bus", () => {
+  class ServiceBusClient {
+    constructor(...args: unknown[]) {
+      sbHarness.lastClientArgs = args;
+    }
+    createReceiver(): FakeReceiver {
+      const r = new FakeReceiver([sbHarness.receiveScript.shift() ?? []]);
+      sbHarness.receivers.push(r);
+      return r;
+    }
+    createSender(): FakeSender {
+      const s = new FakeSender();
+      sbHarness.senders.push(s);
+      return s;
+    }
+    async close(): Promise<void> {
+      sbHarness.clientClosed = true;
+    }
+  }
+  return { ServiceBusClient };
+});
+
+vi.mock("@azure/identity", () => {
+  class ClientSecretCredential {
+    constructor(public tenantId: string, public clientId: string, public secret: string) {}
+    async close(): Promise<void> {}
+  }
+  class ManagedIdentityCredential {
+    constructor(public opts?: { clientId?: string }) {}
+    async close(): Promise<void> {}
+  }
+  return { ClientSecretCredential, ManagedIdentityCredential };
+});
+
+describe("AzureServiceBusBackend", () => {
+  beforeEach(() => {
+    sbHarness.receivers = [];
+    sbHarness.senders = [];
+    sbHarness.receiveScript = [];
+    sbHarness.lastClientArgs = [];
+    sbHarness.clientClosed = false;
+  });
+
+  function makeAzure(): Promise<MessagingBackend> {
+    return getQueue("azure_service_bus", {
+      connectionString: "Endpoint=sb://ns.servicebus.windows.net/;Shared...",
+      queueName: "jobs",
+    });
+  }
+
+  it("send serializes the body and closes the sender", async () => {
+    const b = await makeAzure();
+    await b.send({ a: 1 });
+    expect(sbHarness.senders).toHaveLength(1);
+    expect(sbHarness.senders[0].sent).toEqual([{ body: JSON.stringify({ a: 1 }) }]);
+    expect(sbHarness.senders[0].closed).toBe(true);
+    await b.close();
+  });
+
+  it("send with delay schedules the message", async () => {
+    const b = await makeAzure();
+    await b.send({ a: 1 }, 30);
+    expect(sbHarness.senders[0].scheduled).toHaveLength(1);
+    expect(sbHarness.senders[0].sent).toHaveLength(0);
+    await b.close();
+  });
+
+  it("receive maps messages, tracks lock tokens, and delete completes + closes the receiver", async () => {
+    const b = await makeAzure();
+    sbHarness.receiveScript = [
+      [
+        {
+          lockToken: "lt-1",
+          messageId: "m1",
+          body: JSON.stringify({ n: 1 }),
+          sequenceNumber: 5,
+          enqueuedTimeUtc: "2026-01-01",
+        },
+      ],
+    ];
+
+    const msgs = await b.receive(1, 0);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({
+      id: "m1",
+      body: { n: 1 },
+      receiptHandle: "lt-1",
+    });
+
+    const receiver = sbHarness.receivers[0];
+    expect(receiver.closed).toBe(false);
+
+    await b.delete("lt-1");
+    expect(receiver.completed).toHaveLength(1);
+    // last token acked -> receiver closed
+    expect(receiver.closed).toBe(true);
+
+    await b.close();
+  });
+
+  it("delete with an unknown receipt handle throws MessagingError", async () => {
+    const b = await makeAzure();
+    await expect(b.delete("nope")).rejects.toBeInstanceOf(MessagingError);
+    await b.close();
+  });
+
+  it("receive returns [] and closes the receiver when empty", async () => {
+    const b = await makeAzure();
+    sbHarness.receiveScript = [[]];
+    const msgs = await b.receive(5, 1);
+    expect(msgs).toEqual([]);
+    expect(sbHarness.receivers[0].closed).toBe(true);
+    await b.close();
+  });
+
+  it("purge drains until empty then closes the receiver", async () => {
+    const b = await makeAzure();
+    // createReceiver builds ONE FakeReceiver whose own internal script drains;
+    // purge() loops on that single receiver, so seed its first batch via the
+    // harness and rely on the FakeReceiver returning [] thereafter.
+    sbHarness.receiveScript = [
+      [{ lockToken: "a" }, { lockToken: "b" }],
+    ];
+    await b.purge();
+    const receiver = sbHarness.receivers[0];
+    expect(receiver.completed).toHaveLength(2);
+    expect(receiver.closed).toBe(true);
+    await b.close();
+  });
+
+  it("close() closes the underlying client", async () => {
+    const b = await makeAzure();
+    await b.send({ x: 1 });
+    await b.close();
+    expect(sbHarness.clientClosed).toBe(true);
+  });
+});
+
+describe("getQueue Azure dispatch precedence", () => {
+  it("connectionString wins", async () => {
+    const b = await getQueue("azure_service_bus", {
+      connectionString: "Endpoint=sb://x/;Shared...",
+      queueName: "q",
+      clientSecret: "s",
+      tenantId: "t",
+      clientId: "c",
+      fullyQualifiedNamespace: "ns",
+    });
+    expect(b).toBeInstanceOf(AzureServiceBusBackend);
+    await b.close();
+  });
+
+  it("clientSecret -> service principal", async () => {
+    const b = await getQueue("azure_service_bus", {
+      fullyQualifiedNamespace: "ns.servicebus.windows.net",
+      queueName: "q",
+      tenantId: "t",
+      clientId: "c",
+      clientSecret: "s",
+    });
+    expect(b).toBeInstanceOf(AzureServiceBusBackend);
+    await b.close();
+  });
+
+  it("falls back to managed identity", async () => {
+    const b = await getQueue("azure_service_bus", {
+      fullyQualifiedNamespace: "ns.servicebus.windows.net",
+      queueName: "q",
+    });
+    expect(b).toBeInstanceOf(AzureServiceBusBackend);
+    await b.close();
   });
 });
 

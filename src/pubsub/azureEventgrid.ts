@@ -126,6 +126,14 @@ export class AzureEventGridBackend extends PubSubBackend {
   }
 
   override async close(): Promise<void> {
+    // Mirror Python close(): always release the publisher client's HTTP
+    // transport first, then conditionally close the credential.
+    const client = this.client as
+      | { close?: () => Promise<void> | void }
+      | undefined;
+    if (client !== undefined && typeof client.close === "function") {
+      await client.close();
+    }
     const cred = this.credential as { close?: () => Promise<void> | void } | undefined;
     if (cred !== undefined && typeof cred.close === "function") {
       await cred.close();

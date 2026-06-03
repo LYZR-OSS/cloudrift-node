@@ -82,6 +82,23 @@ describe("documentdb", () => {
     expect(inst.options.tls).toBe(true);
   });
 
+  it("credentials: encodes quote_plus-divergent chars to match Python", async () => {
+    // space -> '+', '*' -> %2A, "'" -> %27, '(' -> %28, ')' -> %29, '!' -> %21.
+    // These are exactly the chars where Python's quote_plus differs from
+    // encodeURIComponent; a naive encodeURIComponent would leave most unescaped
+    // and turn the space into %20 (which a Mongo URI would NOT decode to space).
+    await getMongodb("documentdb", {
+      host: "h",
+      port: 27017,
+      username: "user name",
+      password: "p ss*'()!",
+    });
+    const inst = last();
+    expect(inst.uri).toBe(
+      "mongodb://user+name:p+ss%2A%27%28%29%21@h:27017/",
+    );
+  });
+
   it("credentials: defaults tls true", async () => {
     await getMongodb("documentdb", {
       host: "h",

@@ -175,8 +175,9 @@ export class AWSS3Client {
       },
     };
     if (this.config.endpointUrl) {
+      // Python s3.py only passes endpoint_url and relies on botocore's default
+      // 'auto' addressing — it never forces path-style. Match that behavior.
       config.endpoint = this.config.endpointUrl;
-      config.forcePathStyle = true;
     }
     if (this.config.credentials) {
       config.credentials = this.config.credentials;

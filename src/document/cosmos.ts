@@ -13,9 +13,13 @@
  */
 import type { MongoClient, MongoClientOptions } from "mongodb";
 
-import { DocumentConnectionError } from "../core/errors.js";
+import { CloudRiftError, DocumentConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
-import type { MongoClientConstructor, PoolOptions } from "./documentdb.js";
+import {
+  quotePlus,
+  type MongoClientConstructor,
+  type PoolOptions,
+} from "./documentdb.js";
 
 const DEFAULT_MAX_POOL_SIZE = 100;
 const DEFAULT_MIN_POOL_SIZE = 0;
@@ -56,11 +60,13 @@ async function construct(
   uri: string,
   options: MongoClientOptions,
 ): Promise<MongoClient> {
+  // Resolve the constructor outside the try so a missing-package CloudRiftError
+  // (the actionable "install mongodb ..." hint) propagates unchanged.
+  const Ctor = await resolveCtor();
   try {
-    const Ctor = await resolveCtor();
     return new Ctor(uri, options);
   } catch (err) {
-    if (err instanceof DocumentConnectionError) {
+    if (err instanceof CloudRiftError) {
       throw err;
     }
     throw new DocumentConnectionError(
@@ -88,8 +94,8 @@ export async function connectAccountKey(
   } & PoolOptions,
 ): Promise<MongoClient> {
   const { account, accountKey, port = DEFAULT_PORT, appName } = opts;
-  const user = encodeURIComponent(account);
-  const pwd = encodeURIComponent(accountKey);
+  const user = quotePlus(account);
+  const pwd = quotePlus(accountKey);
   const host = `${account}.mongo.cosmos.azure.com`;
   const app = appName !== undefined ? appName : `@${account}@`;
   const query =
@@ -97,7 +103,7 @@ export async function connectAccountKey(
     "&replicaSet=globaldb" +
     "&retryWrites=false" +
     "&maxIdleTimeMS=120000" +
-    `&appName=${encodeURIComponent(app)}`;
+    `&appName=${quotePlus(app)}`;
   const uri = `mongodb://${user}:${pwd}@${host}:${port}/?${query}`;
   return construct(uri, poolOptions(opts));
 }

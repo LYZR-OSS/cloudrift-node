@@ -62,6 +62,11 @@ export interface SqsProfileOptions extends SqsBackendConfig {
 
 const DEFAULT_REGION = "us-east-1";
 
+// Match Python sqs.py botocore Config defaults.
+const DEFAULT_MAX_POOL_CONNECTIONS = 50;
+const DEFAULT_CONNECT_TIMEOUT = 10; // seconds
+const DEFAULT_READ_TIMEOUT = 60; // seconds
+
 /**
  * AWS SQS messaging backend (native async via `@aws-sdk/client-sqs`).
  *
@@ -141,7 +146,22 @@ export class AWSSQSBackend extends MessagingBackend {
 
   private async createClient(): Promise<SQSClient> {
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
-    const config: SQSClientConfig = { region: this.init.region };
+    // Apply transport tuning (pool size + timeouts), mirroring Python's
+    // botocore Config(max_pool_connections=50, connect_timeout=10,
+    // read_timeout=60). Defaults match Python when the caller leaves them unset.
+    const connectTimeout =
+      this.init.connectTimeout ?? DEFAULT_CONNECT_TIMEOUT;
+    const readTimeout = this.init.readTimeout ?? DEFAULT_READ_TIMEOUT;
+    const maxPoolConnections =
+      this.init.maxPoolConnections ?? DEFAULT_MAX_POOL_CONNECTIONS;
+    const config: SQSClientConfig = {
+      region: this.init.region,
+      requestHandler: {
+        connectionTimeout: connectTimeout * 1000,
+        requestTimeout: readTimeout * 1000,
+        httpsAgent: { maxSockets: maxPoolConnections, keepAlive: true },
+      },
+    };
     if (this.init.endpointUrl !== undefined) {
       config.endpoint = this.init.endpointUrl;
     }

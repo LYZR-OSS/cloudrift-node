@@ -319,11 +319,10 @@ export class AzureBlobBackend extends StorageBackend {
   }
 
   async exists(key: string): Promise<boolean> {
-    try {
-      return await this.blob(key).exists();
-    } catch (err) {
-      this.raise(err, key);
-    }
+    // Mirrors Python azure_blob.py exists(): no try/except, so any non-404
+    // error propagates as the raw SDK error (the SDK returns false for missing
+    // blobs). Do not route through this.raise() here.
+    return await this.blob(key).exists();
   }
 
   async list(prefix = ""): Promise<string[]> {

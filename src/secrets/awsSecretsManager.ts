@@ -164,7 +164,13 @@ export class AWSSecretsManagerBackend extends SecretBackend {
       const response = await client.send(
         new sdk.GetSecretValueCommand({ SecretId: name }),
       );
-      return response.SecretString ?? "";
+      // Python returns response["SecretString"], which raises KeyError when the
+      // field is absent (e.g. a binary-only secret). Hard-fail to match instead
+      // of silently coercing to "".
+      if (response.SecretString === undefined) {
+        throw new SecretError(`Secret has no string value: ${name}`);
+      }
+      return response.SecretString;
     } catch (err) {
       throw mapError(err, name);
     }
@@ -179,14 +185,12 @@ export class AWSSecretsManagerBackend extends SecretBackend {
       );
     } catch (err) {
       if (errorName(err) === "ResourceNotFoundException") {
-        try {
-          await client.send(
-            new sdk.CreateSecretCommand({ Name: name, SecretString: value }),
-          );
-          return;
-        } catch (createErr) {
-          throw mapError(createErr, name);
-        }
+        // Python only wraps the put_secret_value ClientError; a failure of the
+        // create_secret fallback propagates as the raw SDK error (unmapped).
+        await client.send(
+          new sdk.CreateSecretCommand({ Name: name, SecretString: value }),
+        );
+        return;
       }
       throw mapError(err, name);
     }
@@ -262,6 +266,9 @@ function errorName(err: unknown): string | undefined {
 }
 
 function mapError(err: unknown, name: string): Error {
+  if (err instanceof SecretError) {
+    return err;
+  }
   const code = errorName(err);
   if (code === "ResourceNotFoundException") {
     return new SecretNotFoundError(`Secret not found: ${name}`, { cause: err });
