@@ -7,7 +7,7 @@ import {
   ListSecretsCommand,
 } from "@aws-sdk/client-secrets-manager";
 import { mockClient } from "aws-sdk-client-mock";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   SecretError,
@@ -17,6 +17,14 @@ import {
 import { getSecrets } from "../src/secrets/index.js";
 
 const smMock = mockClient(SecretsManagerClient);
+const credentialProviderMock = vi.hoisted(() => ({
+  fromIni: vi.fn(() => async () => ({
+    accessKeyId: "profile-key",
+    secretAccessKey: "profile-secret",
+  })),
+}));
+
+vi.mock("@aws-sdk/credential-providers", () => credentialProviderMock);
 
 /** Build a botocore-style service exception with a `name`. */
 function awsError(name: string): Error {
@@ -37,6 +45,7 @@ async function makeBackend() {
 describe("AWSSecretsManagerBackend", () => {
   beforeEach(() => {
     smMock.reset();
+    credentialProviderMock.fromIni.mockClear();
   });
 
   afterEach(() => {
@@ -79,6 +88,19 @@ describe("AWSSecretsManagerBackend", () => {
 
     const backend = await makeBackend();
     expect(await backend.getSecret("my/secret")).toBe("s3cr3t-value");
+    await backend.close();
+  });
+
+  it("resolves named profiles through fromIni credentials", async () => {
+    smMock.on(ListSecretsCommand).resolves({ SecretList: [] });
+
+    const backend = await getSecrets("aws_secrets_manager", {
+      profileName: "dev",
+      region: "us-east-1",
+    });
+    expect(await backend.healthCheck()).toBe(true);
+
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledWith({ profile: "dev" });
     await backend.close();
   });
 

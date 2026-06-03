@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import {
   SNSClient,
@@ -13,9 +13,18 @@ import { PublishError, CloudRiftError } from "../src/core/errors.js";
 const TOPIC = "arn:aws:sns:us-east-1:123456789012:test-topic";
 
 const snsMock = mockClient(SNSClient);
+const credentialProviderMock = vi.hoisted(() => ({
+  fromIni: vi.fn(() => async () => ({
+    accessKeyId: "profile-key",
+    secretAccessKey: "profile-secret",
+  })),
+}));
+
+vi.mock("@aws-sdk/credential-providers", () => credentialProviderMock);
 
 beforeEach(() => {
   snsMock.reset();
+  credentialProviderMock.fromIni.mockClear();
 });
 
 afterEach(() => {
@@ -124,6 +133,18 @@ describe("AWSSNSBackend.healthCheck", () => {
     snsMock.on(ListTopicsCommand).rejects(new Error("network down"));
     const backend = await makeBackend();
     expect(await backend.healthCheck()).toBe(false);
+    await backend.close();
+  });
+
+  it("resolves named profiles through fromIni credentials", async () => {
+    snsMock.on(ListTopicsCommand).resolves({ Topics: [] });
+    const backend = await getPubsub("sns", {
+      profileName: "dev",
+      region: "us-east-1",
+    });
+
+    expect(await backend.healthCheck()).toBe(true);
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledWith({ profile: "dev" });
     await backend.close();
   });
 });

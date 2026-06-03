@@ -55,6 +55,7 @@ interface BackendConfig {
   maxPoolConnections: number;
   connectTimeout: number;
   readTimeout: number;
+  profileName?: string;
 }
 
 /**
@@ -101,9 +102,11 @@ export class AWSSecretsManagerBackend extends SecretBackend {
   static fromProfile(opts: AwsProfileOptions): AWSSecretsManagerBackend {
     const clientConfig: SecretsManagerClientConfig = {
       region: opts.region ?? "us-east-1",
-      profile: opts.profileName,
     };
-    return new AWSSecretsManagerBackend(buildConfig(clientConfig, opts));
+    return new AWSSecretsManagerBackend({
+      ...buildConfig(clientConfig, opts),
+      profileName: opts.profileName,
+    });
   }
 
   // ------------------------------------------------------------------
@@ -126,6 +129,12 @@ export class AWSSecretsManagerBackend extends SecretBackend {
     const config: SecretsManagerClientConfig = { ...this.#config.clientConfig };
     if (this.#config.endpointUrl !== undefined) {
       config.endpoint = this.#config.endpointUrl;
+    }
+    if (this.#config.profileName !== undefined) {
+      const credsMod = await loadOptional<
+        typeof import("@aws-sdk/credential-providers")
+      >("@aws-sdk/credential-providers", PROVIDER);
+      config.credentials = credsMod.fromIni({ profile: this.#config.profileName });
     }
     config.requestHandler = {
       connectionTimeout: this.#config.connectTimeout * 1000,

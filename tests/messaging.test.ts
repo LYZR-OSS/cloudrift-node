@@ -230,6 +230,12 @@ class FakeSender {
     return {
       messages,
       tryAddMessage(m: unknown) {
+        if (
+          sbHarness.batchMaxMessages !== undefined &&
+          messages.length >= sbHarness.batchMaxMessages
+        ) {
+          return false;
+        }
         messages.push(m);
         return true;
       },
@@ -248,12 +254,14 @@ const sbHarness: {
   receiveScript: Array<Array<Record<string, unknown>>>;
   lastClientArgs: unknown[];
   clientClosed: boolean;
+  batchMaxMessages?: number;
 } = {
   receivers: [],
   senders: [],
   receiveScript: [],
   lastClientArgs: [],
   clientClosed: false,
+  batchMaxMessages: undefined,
 };
 
 vi.mock("@azure/service-bus", () => {
@@ -297,6 +305,7 @@ describe("AzureServiceBusBackend", () => {
     sbHarness.receiveScript = [];
     sbHarness.lastClientArgs = [];
     sbHarness.clientClosed = false;
+    sbHarness.batchMaxMessages = undefined;
   });
 
   function makeAzure(): Promise<MessagingBackend> {
@@ -319,6 +328,35 @@ describe("AzureServiceBusBackend", () => {
     const b = await makeAzure();
     await b.send({ a: 1 }, 30);
     expect(sbHarness.senders[0].scheduled).toHaveLength(1);
+    expect(sbHarness.senders[0].sent).toHaveLength(0);
+    await b.close();
+  });
+
+  it("sendBatch sends multiple Service Bus batches when the current batch fills", async () => {
+    const b = await makeAzure();
+    sbHarness.batchMaxMessages = 2;
+
+    const ids = await b.sendBatch([{ n: 1 }, { n: 2 }, { n: 3 }]);
+
+    expect(ids).toEqual(["", "", ""]);
+    expect(sbHarness.senders[0].sent).toHaveLength(2);
+    expect(sbHarness.senders[0].sent[0]).toMatchObject({
+      messages: [
+        { body: JSON.stringify({ n: 1 }) },
+        { body: JSON.stringify({ n: 2 }) },
+      ],
+    });
+    expect(sbHarness.senders[0].sent[1]).toMatchObject({
+      messages: [{ body: JSON.stringify({ n: 3 }) }],
+    });
+    await b.close();
+  });
+
+  it("sendBatch throws when one message cannot fit in an empty batch", async () => {
+    const b = await makeAzure();
+    sbHarness.batchMaxMessages = 0;
+
+    await expect(b.sendBatch([{ n: 1 }])).rejects.toBeInstanceOf(MessageSendError);
     expect(sbHarness.senders[0].sent).toHaveLength(0);
     await b.close();
   });

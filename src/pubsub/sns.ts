@@ -156,9 +156,11 @@ export class AWSSNSBackend extends PubSubBackend {
         secretAccessKey: this.config.credentials.secretAccessKey,
         sessionToken: this.config.credentials.sessionToken,
       };
-    }
-    if (this.config.profile !== undefined) {
-      cfg.profile = this.config.profile;
+    } else if (this.config.profile !== undefined) {
+      const credsMod = await loadOptional<
+        typeof import("@aws-sdk/credential-providers")
+      >("@aws-sdk/credential-providers", PROVIDER);
+      cfg.credentials = credsMod.fromIni({ profile: this.config.profile });
     }
     return new mod.SNSClient(cfg);
   }

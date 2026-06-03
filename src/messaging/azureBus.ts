@@ -1,5 +1,6 @@
 import type {
   ServiceBusClient,
+  ServiceBusMessageBatch,
   ServiceBusReceiver,
   ServiceBusReceivedMessage,
   ServiceBusSender,
@@ -226,12 +227,33 @@ export class AzureServiceBusBackend extends MessagingBackend {
     const client = await this.ensure();
     const sender: ServiceBusSender = client.createSender(this.queueName);
     try {
-      const batch = await sender.createMessageBatch();
+      let batch: ServiceBusMessageBatch = await sender.createMessageBatch();
+      let batchSize = 0;
+      const ids: string[] = [];
       for (const m of messages) {
-        batch.tryAddMessage({ body: JSON.stringify(m) });
+        const message = { body: JSON.stringify(m) };
+        if (!batch.tryAddMessage(message)) {
+          if (batchSize === 0) {
+            throw new MessageSendError(
+              "Message is too large for an Azure Service Bus batch",
+            );
+          }
+          await sender.sendMessages(batch);
+          batch = await sender.createMessageBatch();
+          batchSize = 0;
+          if (!batch.tryAddMessage(message)) {
+            throw new MessageSendError(
+              "Message is too large for an Azure Service Bus batch",
+            );
+          }
+        }
+        batchSize += 1;
+        ids.push("");
       }
-      await sender.sendMessages(batch);
-      return messages.map(() => "");
+      if (batchSize > 0) {
+        await sender.sendMessages(batch);
+      }
+      return ids;
     } catch (err) {
       throw this.mapSendError(err);
     } finally {
@@ -338,6 +360,9 @@ export class AzureServiceBusBackend extends MessagingBackend {
   }
 
   private mapSendError(err: unknown): Error {
+    if (err instanceof MessageSendError) {
+      return err;
+    }
     if (isEntityNotFound(err)) {
       return new QueueNotFoundError(`Queue not found: ${this.queueName}`, {
         cause: err,
