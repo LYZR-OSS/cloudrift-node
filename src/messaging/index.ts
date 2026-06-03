@@ -1,5 +1,5 @@
 import { CloudRiftError } from "../core/errors.js";
-import { MessagingBackend } from "./base.js";
+import type { MessagingBackend } from "./base.js";
 import {
   AWSSQSBackend,
   type SqsAccessKeyOptions,

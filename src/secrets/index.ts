@@ -1,5 +1,5 @@
 import { CloudRiftError } from "../core/errors.js";
-import { SecretBackend } from "./base.js";
+import type { SecretBackend } from "./base.js";
 import {
   AWSSecretsManagerBackend,
   type AwsAccessKeyOptions,

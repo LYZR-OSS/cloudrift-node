@@ -7,7 +7,7 @@
  * static constructors. Unknown provider or method raises `CloudRiftError`.
  */
 import { CloudRiftError } from "../core/errors.js";
-import { CacheBackend } from "./base.js";
+import type { CacheBackend } from "./base.js";
 import { StandaloneRedisBackend } from "./redisStandalone.js";
 import { AWSElastiCacheBackend } from "./redisElasticache.js";
 import { AzureRedisCacheBackend } from "./redisAzure.js";

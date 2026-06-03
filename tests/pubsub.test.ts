@@ -7,7 +7,7 @@ import {
   ListTopicsCommand,
 } from "@aws-sdk/client-sns";
 
-import { getPubsub, AWSSNSBackend } from "../src/pubsub/index.js";
+import { getPubsub, type AWSSNSBackend } from "../src/pubsub/index.js";
 import { PublishError, CloudRiftError } from "../src/core/errors.js";
 
 const TOPIC = "arn:aws:sns:us-east-1:123456789012:test-topic";

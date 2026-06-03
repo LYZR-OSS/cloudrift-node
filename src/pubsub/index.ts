@@ -7,7 +7,7 @@
  */
 
 import { CloudRiftError } from "../core/errors.js";
-import { PubSubBackend } from "./base.js";
+import type { PubSubBackend } from "./base.js";
 import { AWSSNSBackend } from "./sns.js";
 import { AzureEventGridBackend } from "./azureEventgrid.js";
 
