@@ -148,6 +148,17 @@ export class AzureServiceBusBackend extends MessagingBackend {
     return this.clientPromise;
   }
 
+  private async ensureClient(): Promise<ServiceBusClient> {
+    try {
+      return await this.ensure();
+    } catch (err) {
+      this.clientPromise = undefined;
+      this.client = undefined;
+      this.credential = undefined;
+      throw err;
+    }
+  }
+
   private async createClient(): Promise<ServiceBusClient> {
     const sdk = await loadOptional<ServiceBusModule>(SB_PACKAGE, PROVIDER);
     if (this.init.connectionString) {
@@ -156,10 +167,15 @@ export class AzureServiceBusBackend extends MessagingBackend {
       const identity = await loadOptional<IdentityModule>(IDENTITY_PACKAGE, PROVIDER);
       const credential = this.init.credentialFactory!(identity) as ClosableCredential & object;
       this.credential = credential;
-      this.client = new sdk.ServiceBusClient(
-        this.init.fullyQualifiedNamespace!,
-        credential as never,
-      );
+      try {
+        this.client = new sdk.ServiceBusClient(
+          this.init.fullyQualifiedNamespace!,
+          credential as never,
+        );
+      } catch (err) {
+        await this.closeCredential();
+        throw err;
+      }
     }
     return this.client;
   }
@@ -179,10 +195,14 @@ export class AzureServiceBusBackend extends MessagingBackend {
       this.client = undefined;
       this.clientPromise = undefined;
     }
+    await this.closeCredential();
+  }
+
+  private async closeCredential(): Promise<void> {
     if (this.credential?.close !== undefined) {
       await this.credential.close();
-      this.credential = undefined;
     }
+    this.credential = undefined;
   }
 
   // ------------------------------------------------------------------
@@ -190,7 +210,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
   // ------------------------------------------------------------------
 
   async send(message: Record<string, unknown>, delay = 0): Promise<string> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sender: ServiceBusSender = client.createSender(this.queueName);
     try {
       const sbMessage = { body: JSON.stringify(message) };
@@ -209,7 +229,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
   }
 
   async sendBatch(messages: Array<Record<string, unknown>>): Promise<string[]> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sender: ServiceBusSender = client.createSender(this.queueName);
     try {
       let batch: ServiceBusMessageBatch = await sender.createMessageBatch();
@@ -243,7 +263,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
   }
 
   async receive(maxMessages = 1, waitTime = 0): Promise<Message[]> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const receiver: ServiceBusReceiver = client.createReceiver(this.queueName);
     try {
       const raw = await receiver.receiveMessages(maxMessages, {
@@ -309,7 +329,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
 
   override async healthCheck(): Promise<boolean> {
     try {
-      const client = await this.ensure();
+      const client = await this.ensureClient();
       const sender = client.createSender(this.queueName);
       await sender.close();
       return true;
@@ -319,7 +339,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
   }
 
   async purge(): Promise<void> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const receiver: ServiceBusReceiver = client.createReceiver(this.queueName);
     try {
       for (;;) {

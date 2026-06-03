@@ -80,7 +80,13 @@ export class AzureKeyVaultBackend extends SecretBackend {
     if (!this.#ensurePromise) {
       this.#ensurePromise = this.#createClient();
     }
-    return this.#ensurePromise;
+    try {
+      return await this.#ensurePromise;
+    } catch (err) {
+      this.#ensurePromise = undefined;
+      this.#credential = undefined;
+      throw err;
+    }
   }
 
   async #createClient(): Promise<SecretClient> {
@@ -88,7 +94,14 @@ export class AzureKeyVaultBackend extends SecretBackend {
     const identity = await loadOptional<IdentitySdk>(IDENTITY_PACKAGE, PROVIDER);
     const credential = this.#config.credentialFactory(identity);
     this.#credential = credential;
-    const client = new keyvault.SecretClient(this.#config.vaultUrl, credential);
+    let client: SecretClient;
+    try {
+      client = new keyvault.SecretClient(this.#config.vaultUrl, credential);
+    } catch (err) {
+      await closeCredential(credential);
+      this.#credential = undefined;
+      throw err;
+    }
     this.#client = client;
     return client;
   }
@@ -178,4 +191,11 @@ function mapError(err: unknown, name: string): Error {
   }
   const message = err instanceof Error ? err.message : String(err);
   return new SecretError(message, { cause: err });
+}
+
+async function closeCredential(credential: TokenCredential | undefined): Promise<void> {
+  const closable = credential as (TokenCredential & { close?: () => Promise<void> }) | undefined;
+  if (closable && typeof closable.close === "function") {
+    await closable.close();
+  }
 }

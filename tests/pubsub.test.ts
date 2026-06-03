@@ -7,8 +7,13 @@ import {
   ListTopicsCommand,
 } from "@aws-sdk/client-sns";
 
-import { AWSSNSBackend, getPubsub } from "../src/pubsub/index.js";
-import { PublishError, CloudRiftError } from "../src/core/errors.js";
+import { AWSSNSBackend, AzureEventGridBackend, getPubsub } from "../src/pubsub/index.js";
+import {
+  PublishError,
+  CloudRiftError,
+  PubSubError,
+  TopicNotFoundError,
+} from "../src/core/errors.js";
 
 const TOPIC = "arn:aws:sns:us-east-1:123456789012:test-topic";
 
@@ -21,6 +26,97 @@ const credentialProviderMock = vi.hoisted(() => ({
 }));
 
 vi.mock("@aws-sdk/credential-providers", () => credentialProviderMock);
+
+class FakeRestError extends Error {
+  statusCode: number;
+
+  constructor(statusCode: number, message = `status ${statusCode}`) {
+    super(message);
+    this.name = "RestError";
+    this.statusCode = statusCode;
+  }
+}
+
+const eventGridHarness = vi.hoisted(() => ({
+  clients: [] as Array<{
+    endpoint: string;
+    schema: string;
+    credential: unknown;
+    sent: unknown[][];
+    closed: boolean;
+  }>,
+  credentials: [] as Array<{ kind: string; args: unknown[]; closed: boolean }>,
+  failNextClientCreations: 0,
+  sendError: undefined as Error | undefined,
+}));
+
+vi.mock("@azure/eventgrid", () => {
+  class AzureKeyCredential {
+    constructor(public key: string) {
+      eventGridHarness.credentials.push({ kind: "access-key", args: [key], closed: false });
+    }
+  }
+
+  class EventGridPublisherClient {
+    sent: unknown[][] = [];
+    closed = false;
+
+    constructor(
+      public endpoint: string,
+      public schema: string,
+      public credential: unknown,
+    ) {
+      if (eventGridHarness.failNextClientCreations > 0) {
+        eventGridHarness.failNextClientCreations -= 1;
+        throw new Error("event grid init unavailable");
+      }
+      eventGridHarness.clients.push(this);
+    }
+
+    async send(events: unknown[]): Promise<void> {
+      if (eventGridHarness.sendError !== undefined) {
+        throw eventGridHarness.sendError;
+      }
+      this.sent.push(events);
+    }
+
+    async close(): Promise<void> {
+      this.closed = true;
+    }
+  }
+
+  return { AzureKeyCredential, EventGridPublisherClient };
+});
+
+vi.mock("@azure/identity", () => {
+  class ManagedIdentityCredential {
+    record: { kind: string; args: unknown[]; closed: boolean };
+
+    constructor(...args: unknown[]) {
+      this.record = { kind: "managed", args, closed: false };
+      eventGridHarness.credentials.push(this.record);
+    }
+
+    async close(): Promise<void> {
+      this.record.closed = true;
+    }
+  }
+
+  class ClientSecretCredential {
+    record: { kind: string; args: unknown[]; closed: boolean };
+
+    constructor(...args: unknown[]) {
+      this.record = { kind: "service-principal", args, closed: false };
+      eventGridHarness.credentials.push(this.record);
+    }
+
+    async close(): Promise<void> {
+      this.record.closed = true;
+    }
+  }
+
+  return { ManagedIdentityCredential, ClientSecretCredential };
+});
 
 beforeEach(() => {
   snsMock.reset();
@@ -146,6 +242,161 @@ describe("AWSSNSBackend.healthCheck", () => {
     expect(await backend.healthCheck()).toBe(true);
     expect(credentialProviderMock.fromIni).toHaveBeenCalledWith({ profile: "dev" });
     await backend.close();
+  });
+
+  it("retries lazy client creation after a failed profile init", async () => {
+    snsMock.on(PublishCommand).resolves({ MessageId: "msg-retry" });
+    credentialProviderMock.fromIni
+      .mockImplementationOnce(() => {
+        throw new Error("profile unavailable");
+      })
+      .mockReturnValueOnce(async () => ({
+        accessKeyId: "retry-key",
+        secretAccessKey: "retry-secret",
+      }));
+    const backend = AWSSNSBackend.fromProfile({
+      profileName: "dev",
+      region: "us-east-1",
+    });
+
+    await expect(backend.publish(TOPIC, "first")).rejects.toThrow(/profile unavailable/);
+    await expect(backend.publish(TOPIC, "second")).resolves.toBe("msg-retry");
+
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledTimes(2);
+    expect(snsMock.commandCalls(PublishCommand)).toHaveLength(1);
+    await backend.close();
+  });
+});
+
+describe("AzureEventGridBackend (fake)", () => {
+  beforeEach(() => {
+    eventGridHarness.clients = [];
+    eventGridHarness.credentials = [];
+    eventGridHarness.failNextClientCreations = 0;
+    eventGridHarness.sendError = undefined;
+  });
+
+  it("dispatches access-key auth and publishes a CloudEvent envelope", async () => {
+    const backend = (await getPubsub("azure_eventgrid", {
+      endpoint: "https://topic.eastus-1.eventgrid.azure.net/api/events",
+      accessKey: "key",
+    })) as AzureEventGridBackend;
+
+    const id = await backend.publish("orders", "created", { tenant: "lyzr" });
+
+    expect(id).toEqual(expect.any(String));
+    expect(eventGridHarness.credentials[0]).toMatchObject({
+      kind: "access-key",
+      args: ["key"],
+    });
+    expect(eventGridHarness.clients[0]).toMatchObject({
+      endpoint: "https://topic.eastus-1.eventgrid.azure.net/api/events",
+      schema: "CloudEvent",
+    });
+    expect(eventGridHarness.clients[0].sent[0]).toEqual([
+      {
+        type: "cloudrift.event",
+        source: "orders",
+        id,
+        data: "created",
+        extensionAttributes: { tenant: "lyzr" },
+      },
+    ]);
+    await backend.close();
+    expect(eventGridHarness.clients[0].closed).toBe(true);
+  });
+
+  it("dispatches managed identity and service principal auth", async () => {
+    const managed = await getPubsub("azure_eventgrid", {
+      endpoint: "https://topic",
+      clientId: "managed-client",
+    });
+    await managed.publish("topic", "message");
+    await managed.close();
+
+    const principal = await getPubsub("azure_eventgrid", {
+      endpoint: "https://topic",
+      tenantId: "tenant",
+      clientId: "client",
+      clientSecret: "secret",
+    });
+    await principal.publish("topic", "message");
+    await principal.close();
+
+    expect(eventGridHarness.credentials.map((credential) => credential.kind)).toEqual([
+      "managed",
+      "service-principal",
+    ]);
+    expect(eventGridHarness.credentials[0].args).toEqual([{ clientId: "managed-client" }]);
+    expect(eventGridHarness.credentials[1].args).toEqual(["tenant", "client", "secret"]);
+    expect(eventGridHarness.credentials.every((credential) => credential.closed)).toBe(true);
+  });
+
+  it("publishes batches as CloudEvents with attributes", async () => {
+    const backend = AzureEventGridBackend.fromAccessKey({
+      endpoint: "https://topic",
+      accessKey: "key",
+    });
+
+    const ids = await backend.publishBatch("orders", [
+      { message: "created", attributes: { seq: "1" } },
+      { message: "updated" },
+    ]);
+
+    expect(ids).toHaveLength(2);
+    expect(eventGridHarness.clients[0].sent[0]).toEqual([
+      {
+        type: "cloudrift.event",
+        source: "orders",
+        id: ids[0],
+        data: "created",
+        extensionAttributes: { seq: "1" },
+      },
+      {
+        type: "cloudrift.event",
+        source: "orders",
+        id: ids[1],
+        data: "updated",
+        extensionAttributes: {},
+      },
+    ]);
+    await backend.close();
+  });
+
+  it("maps provider errors", async () => {
+    const backend = AzureEventGridBackend.fromAccessKey({
+      endpoint: "https://topic",
+      accessKey: "key",
+    });
+
+    eventGridHarness.sendError = new FakeRestError(404);
+    await expect(backend.publish("missing", "message")).rejects.toBeInstanceOf(TopicNotFoundError);
+
+    eventGridHarness.sendError = new FakeRestError(403);
+    await expect(backend.publish("denied", "message")).rejects.toBeInstanceOf(PubSubError);
+
+    eventGridHarness.sendError = new Error("boom");
+    await expect(backend.publish("failed", "message")).rejects.toBeInstanceOf(PublishError);
+    await backend.close();
+  });
+
+  it("retries lazy client creation after the first initialization fails", async () => {
+    eventGridHarness.failNextClientCreations = 1;
+    const backend = AzureEventGridBackend.fromManagedIdentity({
+      endpoint: "https://topic",
+      clientId: "managed-client",
+    });
+
+    await expect(backend.publish("orders", "first")).rejects.toThrow(/event grid init unavailable/);
+    await expect(backend.publish("orders", "second")).resolves.toEqual(expect.any(String));
+
+    expect(eventGridHarness.clients).toHaveLength(1);
+    expect(eventGridHarness.credentials).toHaveLength(2);
+    expect(eventGridHarness.credentials[0].closed).toBe(true);
+    expect(eventGridHarness.credentials[1].closed).toBe(false);
+    expect(eventGridHarness.clients[0].sent).toHaveLength(1);
+    await backend.close();
+    expect(eventGridHarness.credentials[1].closed).toBe(true);
   });
 });
 

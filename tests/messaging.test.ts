@@ -19,6 +19,14 @@ import type { MessagingBackend } from "../src/messaging/base.js";
 const QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue";
 
 const sqsMock = mockClient(SQSClient);
+const credentialProviderMock = vi.hoisted(() => ({
+  fromIni: vi.fn(() => async () => ({
+    accessKeyId: "profile-key",
+    secretAccessKey: "profile-secret",
+  })),
+}));
+
+vi.mock("@aws-sdk/credential-providers", () => credentialProviderMock);
 
 function makeBackend(): MessagingBackend {
   return AWSSQSBackend.fromAccessKey({
@@ -34,6 +42,11 @@ describe("AWSSQSBackend", () => {
 
   beforeEach(() => {
     sqsMock.reset();
+    credentialProviderMock.fromIni.mockReset();
+    credentialProviderMock.fromIni.mockReturnValue(async () => ({
+      accessKeyId: "profile-key",
+      secretAccessKey: "profile-secret",
+    }));
     backend = makeBackend();
   });
 
@@ -198,6 +211,30 @@ describe("AWSSQSBackend", () => {
 
     expect(await backend.healthCheck()).toBe(false);
   });
+
+  it("retries lazy client creation after a failed profile init", async () => {
+    await backend.close();
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: "msg-retry" });
+    credentialProviderMock.fromIni
+      .mockImplementationOnce(() => {
+        throw new Error("profile unavailable");
+      })
+      .mockReturnValueOnce(async () => ({
+        accessKeyId: "retry-key",
+        secretAccessKey: "retry-secret",
+      }));
+    backend = AWSSQSBackend.fromProfile({
+      queueUrl: QUEUE_URL,
+      profileName: "dev",
+      region: "us-east-1",
+    });
+
+    await expect(backend.send({ attempt: 1 })).rejects.toThrow(/profile unavailable/);
+    await expect(backend.send({ attempt: 2 })).resolves.toBe("msg-retry");
+
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledTimes(2);
+    expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(1);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -273,6 +310,7 @@ const sbHarness: {
   receiveScript: Array<Array<Record<string, unknown>>>;
   lastClientArgs: unknown[];
   clientClosed: boolean;
+  failNextClientCreations: number;
   batchMaxMessages?: number;
 } = {
   receivers: [],
@@ -280,12 +318,17 @@ const sbHarness: {
   receiveScript: [],
   lastClientArgs: [],
   clientClosed: false,
+  failNextClientCreations: 0,
   batchMaxMessages: undefined,
 };
 
 vi.mock("@azure/service-bus", () => {
   class ServiceBusClient {
     constructor(...args: unknown[]) {
+      if (sbHarness.failNextClientCreations > 0) {
+        sbHarness.failNextClientCreations -= 1;
+        throw new Error("service bus init unavailable");
+      }
       sbHarness.lastClientArgs = args;
     }
     createReceiver(): FakeReceiver {
@@ -328,6 +371,7 @@ describe("AzureServiceBusBackend", () => {
     sbHarness.receiveScript = [];
     sbHarness.lastClientArgs = [];
     sbHarness.clientClosed = false;
+    sbHarness.failNextClientCreations = 0;
     sbHarness.batchMaxMessages = undefined;
   });
 
@@ -447,6 +491,18 @@ describe("AzureServiceBusBackend", () => {
     await b.send({ x: 1 });
     await b.close();
     expect(sbHarness.clientClosed).toBe(true);
+  });
+
+  it("retries lazy client creation after the first initialization fails", async () => {
+    const b = await makeAzure();
+    sbHarness.failNextClientCreations = 1;
+
+    await expect(b.send({ attempt: 1 })).rejects.toThrow(/service bus init unavailable/);
+    await expect(b.send({ attempt: 2 })).resolves.toBe("");
+
+    expect(sbHarness.senders).toHaveLength(1);
+    expect(sbHarness.senders[0].sent).toEqual([{ body: JSON.stringify({ attempt: 2 }) }]);
+    await b.close();
   });
 });
 

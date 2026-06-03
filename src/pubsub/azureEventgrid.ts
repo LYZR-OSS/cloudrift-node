@@ -77,7 +77,13 @@ export class AzureEventGridBackend extends PubSubBackend {
         opts.clientId !== undefined
           ? new identity.ManagedIdentityCredential({ clientId: opts.clientId })
           : new identity.ManagedIdentityCredential();
-      const client = new mod.EventGridPublisherClient(opts.endpoint, "CloudEvent", credential);
+      let client: CloudEventClient;
+      try {
+        client = new mod.EventGridPublisherClient(opts.endpoint, "CloudEvent", credential);
+      } catch (err) {
+        await closeCredential(credential);
+        throw err;
+      }
       return { client, credential };
     });
   }
@@ -96,7 +102,13 @@ export class AzureEventGridBackend extends PubSubBackend {
         opts.clientId,
         opts.clientSecret,
       );
-      const client = new mod.EventGridPublisherClient(opts.endpoint, "CloudEvent", credential);
+      let client: CloudEventClient;
+      try {
+        client = new mod.EventGridPublisherClient(opts.endpoint, "CloudEvent", credential);
+      } catch (err) {
+        await closeCredential(credential);
+        throw err;
+      }
       return { client, credential };
     });
   }
@@ -115,8 +127,14 @@ export class AzureEventGridBackend extends PubSubBackend {
         return client;
       });
     }
-    this.client = await this.initializing;
-    return this.client;
+    try {
+      this.client = await this.initializing;
+      return this.client;
+    } catch (err) {
+      this.initializing = undefined;
+      this.credential = undefined;
+      throw err;
+    }
   }
 
   override async close(): Promise<void> {
@@ -213,4 +231,11 @@ function errorMessage(err: unknown): string {
     return err.message;
   }
   return String(err);
+}
+
+async function closeCredential(credential: TokenCredential | undefined): Promise<void> {
+  const closable = credential as (TokenCredential & { close?: () => Promise<void> }) | undefined;
+  if (closable && typeof closable.close === "function") {
+    await closable.close();
+  }
 }

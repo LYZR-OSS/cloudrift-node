@@ -43,6 +43,15 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
   ),
 }));
 
+const credentialProviderMock = vi.hoisted(() => ({
+  fromIni: vi.fn(() => async () => ({
+    accessKeyId: "profile-key",
+    secretAccessKey: "profile-secret",
+  })),
+}));
+
+vi.mock("@aws-sdk/credential-providers", () => credentialProviderMock);
+
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
@@ -72,6 +81,11 @@ const BUCKET = "test-bucket";
 
 beforeEach(() => {
   s3Mock.reset();
+  credentialProviderMock.fromIni.mockReset();
+  credentialProviderMock.fromIni.mockReturnValue(async () => ({
+    accessKeyId: "profile-key",
+    secretAccessKey: "profile-secret",
+  }));
 });
 
 afterEach(() => {
@@ -252,6 +266,44 @@ describe("AWSS3Backend", () => {
     s3Mock.on(GetObjectCommand).rejects(orig);
     const backend = await makeBackend();
     await expect(backend.download("k.txt")).rejects.toMatchObject({ cause: orig });
+  });
+
+  it("loads profile credentials from the declared credential providers package", async () => {
+    s3Mock.on(HeadObjectCommand).resolves({});
+    const backend = AWSS3Backend.fromProfile({
+      bucket: BUCKET,
+      profileName: "dev",
+      region: "us-east-1",
+    });
+
+    await expect(backend.exists("profile.txt")).resolves.toBe(true);
+
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledWith({ profile: "dev" });
+  });
+
+  it("retries lazy client creation after a failed profile init", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    credentialProviderMock.fromIni
+      .mockImplementationOnce(() => {
+        throw new Error("profile unavailable");
+      })
+      .mockReturnValueOnce(async () => ({
+        accessKeyId: "retry-key",
+        secretAccessKey: "retry-secret",
+      }));
+    const backend = AWSS3Backend.fromProfile({
+      bucket: BUCKET,
+      profileName: "dev",
+      region: "us-east-1",
+    });
+
+    await expect(backend.upload("first.txt", Buffer.from("x"))).rejects.toThrow(
+      /profile unavailable/,
+    );
+    await expect(backend.upload("second.txt", Buffer.from("x"))).resolves.toBe("second.txt");
+
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledTimes(2);
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(1);
   });
 });
 

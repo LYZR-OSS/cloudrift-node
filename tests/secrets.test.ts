@@ -10,7 +10,11 @@ import { mockClient } from "aws-sdk-client-mock";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SecretError, SecretNotFoundError, SecretPermissionError } from "../src/core/errors.js";
-import { AWSSecretsManagerBackend, getSecrets } from "../src/secrets/index.js";
+import {
+  AWSSecretsManagerBackend,
+  AzureKeyVaultBackend,
+  getSecrets,
+} from "../src/secrets/index.js";
 
 const smMock = mockClient(SecretsManagerClient);
 const credentialProviderMock = vi.hoisted(() => ({
@@ -21,6 +25,96 @@ const credentialProviderMock = vi.hoisted(() => ({
 }));
 
 vi.mock("@aws-sdk/credential-providers", () => credentialProviderMock);
+
+class FakeRestError extends Error {
+  statusCode: number;
+
+  constructor(statusCode: number, message = `status ${statusCode}`) {
+    super(message);
+    this.name = "RestError";
+    this.statusCode = statusCode;
+  }
+}
+
+const keyVaultHarness = vi.hoisted(() => ({
+  secrets: new Map<string, string | undefined>(),
+  deleted: [] as string[],
+  clients: [] as unknown[],
+  credentials: [] as Array<{ kind: string; args: unknown[]; closed: boolean }>,
+  failNextClientCreations: 0,
+}));
+
+vi.mock("@azure/keyvault-secrets", () => {
+  class SecretClient {
+    constructor(
+      public vaultUrl: string,
+      public credential: unknown,
+    ) {
+      if (keyVaultHarness.failNextClientCreations > 0) {
+        keyVaultHarness.failNextClientCreations -= 1;
+        throw new Error("key vault init unavailable");
+      }
+      keyVaultHarness.clients.push(this);
+    }
+
+    async getSecret(name: string): Promise<{ value?: string }> {
+      if (!keyVaultHarness.secrets.has(name)) {
+        throw new FakeRestError(404);
+      }
+      return { value: keyVaultHarness.secrets.get(name) };
+    }
+
+    async setSecret(name: string, value: string): Promise<void> {
+      keyVaultHarness.secrets.set(name, value);
+    }
+
+    async beginDeleteSecret(name: string): Promise<{ pollUntilDone(): Promise<void> }> {
+      if (!keyVaultHarness.secrets.has(name)) {
+        throw new FakeRestError(404);
+      }
+      keyVaultHarness.secrets.delete(name);
+      keyVaultHarness.deleted.push(name);
+      return { pollUntilDone: async () => undefined };
+    }
+
+    async *listPropertiesOfSecrets(): AsyncGenerator<{ name: string }> {
+      for (const name of keyVaultHarness.secrets.keys()) {
+        yield { name };
+      }
+    }
+  }
+  return { SecretClient };
+});
+
+vi.mock("@azure/identity", () => {
+  class ManagedIdentityCredential {
+    record: { kind: string; args: unknown[]; closed: boolean };
+
+    constructor(...args: unknown[]) {
+      this.record = { kind: "managed", args, closed: false };
+      keyVaultHarness.credentials.push(this.record);
+    }
+
+    async close(): Promise<void> {
+      this.record.closed = true;
+    }
+  }
+
+  class ClientSecretCredential {
+    record: { kind: string; args: unknown[]; closed: boolean };
+
+    constructor(...args: unknown[]) {
+      this.record = { kind: "service-principal", args, closed: false };
+      keyVaultHarness.credentials.push(this.record);
+    }
+
+    async close(): Promise<void> {
+      this.record.closed = true;
+    }
+  }
+
+  return { ManagedIdentityCredential, ClientSecretCredential };
+});
 
 /** Build a botocore-style service exception with a `name`. */
 function awsError(name: string): Error {
@@ -189,6 +283,117 @@ describe("AWSSecretsManagerBackend", () => {
     const backend = await makeBackend();
     expect(await backend.healthCheck()).toBe(false);
     await backend.close();
+  });
+
+  it("retries lazy client creation after a failed profile init", async () => {
+    smMock.on(GetSecretValueCommand).resolves({ SecretString: "retried" });
+    credentialProviderMock.fromIni
+      .mockImplementationOnce(() => {
+        throw new Error("profile unavailable");
+      })
+      .mockReturnValueOnce(async () => ({
+        accessKeyId: "retry-key",
+        secretAccessKey: "retry-secret",
+      }));
+    const backend = AWSSecretsManagerBackend.fromProfile({
+      profileName: "dev",
+      region: "us-east-1",
+    });
+
+    await expect(backend.getSecret("first")).rejects.toThrow(/profile unavailable/);
+    await expect(backend.getSecret("second")).resolves.toBe("retried");
+
+    expect(credentialProviderMock.fromIni).toHaveBeenCalledTimes(2);
+    expect(smMock.commandCalls(GetSecretValueCommand)).toHaveLength(1);
+    await backend.close();
+  });
+});
+
+describe("AzureKeyVaultBackend (fake)", () => {
+  beforeEach(() => {
+    keyVaultHarness.secrets.clear();
+    keyVaultHarness.deleted = [];
+    keyVaultHarness.clients = [];
+    keyVaultHarness.credentials = [];
+    keyVaultHarness.failNextClientCreations = 0;
+  });
+
+  it("dispatches managed identity auth and performs CRUD with prefix listing", async () => {
+    const backend = (await getSecrets("azure_keyvault", {
+      vaultUrl: "https://vault.vault.azure.net",
+      clientId: "managed-client",
+    })) as AzureKeyVaultBackend;
+
+    await backend.setSecret("app/a", "one");
+    await backend.setSecret("app/b", "two");
+    await backend.setSecret("other/c", "three");
+
+    expect(await backend.getSecret("app/a")).toBe("one");
+    expect(new Set(await backend.listSecrets("app/"))).toEqual(new Set(["app/a", "app/b"]));
+
+    await backend.deleteSecret("app/a");
+    await expect(backend.getSecret("app/a")).rejects.toBeInstanceOf(SecretNotFoundError);
+    expect(keyVaultHarness.deleted).toEqual(["app/a"]);
+    expect(keyVaultHarness.credentials[0]).toMatchObject({
+      kind: "managed",
+      args: [{ clientId: "managed-client" }],
+    });
+
+    await backend.close();
+    expect(keyVaultHarness.credentials[0]?.closed).toBe(true);
+  });
+
+  it("dispatches service principal auth", async () => {
+    const backend = await getSecrets("azure_keyvault", {
+      vaultUrl: "https://vault.vault.azure.net",
+      tenantId: "tenant",
+      clientId: "client",
+      clientSecret: "secret",
+    });
+
+    await backend.setSecret("name", "value");
+
+    expect(keyVaultHarness.credentials[0]).toMatchObject({
+      kind: "service-principal",
+      args: ["tenant", "client", "secret"],
+    });
+    await backend.close();
+  });
+
+  it("maps permission failures and coerces nullish secret values to empty strings", async () => {
+    keyVaultHarness.secrets.set("empty", undefined);
+    const backend = AzureKeyVaultBackend.fromManagedIdentity({
+      vaultUrl: "https://vault.vault.azure.net",
+    });
+
+    await expect(backend.getSecret("empty")).resolves.toBe("");
+
+    const originalGet = keyVaultHarness.secrets.get.bind(keyVaultHarness.secrets);
+    keyVaultHarness.secrets.set("denied", "value");
+    keyVaultHarness.secrets.get = () => {
+      throw new FakeRestError(403);
+    };
+    await expect(backend.getSecret("denied")).rejects.toBeInstanceOf(SecretPermissionError);
+    keyVaultHarness.secrets.get = originalGet;
+    await backend.close();
+  });
+
+  it("retries lazy client creation after the first initialization fails", async () => {
+    keyVaultHarness.failNextClientCreations = 1;
+    const backend = AzureKeyVaultBackend.fromManagedIdentity({
+      vaultUrl: "https://vault.vault.azure.net",
+    });
+
+    await expect(backend.setSecret("first", "value")).rejects.toThrow(/key vault init unavailable/);
+    await expect(backend.setSecret("second", "value")).resolves.toBeUndefined();
+
+    expect(keyVaultHarness.clients).toHaveLength(1);
+    expect(keyVaultHarness.credentials).toHaveLength(2);
+    expect(keyVaultHarness.credentials[0].closed).toBe(true);
+    expect(keyVaultHarness.credentials[1].closed).toBe(false);
+    expect(keyVaultHarness.secrets.get("second")).toBe("value");
+    await backend.close();
+    expect(keyVaultHarness.credentials[1].closed).toBe(true);
   });
 });
 

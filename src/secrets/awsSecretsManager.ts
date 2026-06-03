@@ -116,7 +116,13 @@ export class AWSSecretsManagerBackend extends SecretBackend {
     if (!this.#ensurePromise) {
       this.#ensurePromise = this.#createClient();
     }
-    return this.#ensurePromise;
+    try {
+      return await this.#ensurePromise;
+    } catch (err) {
+      this.#ensurePromise = undefined;
+      this.#sdk = undefined;
+      throw err;
+    }
   }
 
   async #createClient(): Promise<SecretsManagerClient> {

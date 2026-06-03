@@ -130,8 +130,14 @@ export class AWSSNSBackend extends PubSubBackend {
     if (this.ensuring === undefined) {
       this.ensuring = this.createClient();
     }
-    this.client = await this.ensuring;
-    return this.client;
+    try {
+      this.client = await this.ensuring;
+      return this.client;
+    } catch (err) {
+      this.ensuring = undefined;
+      this.mod = undefined;
+      throw err;
+    }
   }
 
   private async createClient(): Promise<SNSClient> {

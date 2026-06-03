@@ -47,7 +47,7 @@ function isModuleNotFound(err: unknown, pkg: string): boolean {
   const message = (err as { message?: unknown }).message;
   return (
     typeof message === "string" &&
-    /cannot find (module|package)/i.test(message) &&
+    (/cannot find (module|package)/i.test(message) || /failed to load url/i.test(message)) &&
     message.includes(pkg)
   );
 }

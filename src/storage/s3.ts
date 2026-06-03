@@ -182,7 +182,13 @@ export class AWSS3Client {
     if (this.clientPromise === null) {
       this.clientPromise = this.create();
     }
-    return this.clientPromise;
+    try {
+      return await this.clientPromise;
+    } catch (err) {
+      this.clientPromise = null;
+      this._client = null;
+      throw err;
+    }
   }
 
   private async create(): Promise<S3ClientLike> {
@@ -203,9 +209,10 @@ export class AWSS3Client {
     if (this.config.credentials) {
       config.credentials = this.config.credentials;
     } else if (this.config.profileName) {
-      const { fromIni } = await loadOptional<{
-        fromIni: (init: { profile: string }) => unknown;
-      }>("@aws-sdk/credential-provider-ini", PROVIDER);
+      const { fromIni } = await loadOptional<typeof import("@aws-sdk/credential-providers")>(
+        "@aws-sdk/credential-providers",
+        PROVIDER,
+      );
       config.credentials = fromIni({ profile: this.config.profileName });
     }
     const client = new mod.S3Client(config);

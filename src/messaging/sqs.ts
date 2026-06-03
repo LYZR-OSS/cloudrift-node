@@ -141,6 +141,16 @@ export class AWSSQSBackend extends MessagingBackend {
     return this.clientPromise;
   }
 
+  private async ensureClient(): Promise<SQSClient> {
+    try {
+      return await this.ensure();
+    } catch (err) {
+      this.clientPromise = undefined;
+      this.client = undefined;
+      throw err;
+    }
+  }
+
   private async createClient(): Promise<SQSClient> {
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     // Apply transport tuning (pool size + timeouts), mirroring Python's
@@ -182,7 +192,7 @@ export class AWSSQSBackend extends MessagingBackend {
   // ------------------------------------------------------------------
 
   async send(message: Record<string, unknown>, delay = 0): Promise<string> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     try {
       const response: SendMessageCommandOutput = await client.send(
@@ -199,7 +209,7 @@ export class AWSSQSBackend extends MessagingBackend {
   }
 
   async sendBatch(messages: Array<Record<string, unknown>>): Promise<string[]> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     const ids: string[] = [];
     try {
@@ -228,7 +238,7 @@ export class AWSSQSBackend extends MessagingBackend {
   }
 
   async receive(maxMessages = 1, waitTime = 0): Promise<Message[]> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     try {
       const response: ReceiveMessageCommandOutput = await client.send(
@@ -251,7 +261,7 @@ export class AWSSQSBackend extends MessagingBackend {
   }
 
   async delete(receiptHandle: string): Promise<void> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     try {
       await client.send(
@@ -266,7 +276,7 @@ export class AWSSQSBackend extends MessagingBackend {
   }
 
   async purge(): Promise<void> {
-    const client = await this.ensure();
+    const client = await this.ensureClient();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     try {
       await client.send(new sdk.PurgeQueueCommand({ QueueUrl: this.queueUrl }));
@@ -277,7 +287,7 @@ export class AWSSQSBackend extends MessagingBackend {
 
   override async healthCheck(): Promise<boolean> {
     try {
-      const client = await this.ensure();
+      const client = await this.ensureClient();
       const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
       await client.send(
         new sdk.GetQueueAttributesCommand({
