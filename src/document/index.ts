@@ -14,11 +14,7 @@
 import type { MongoClient } from "mongodb";
 
 import { CloudRiftError } from "../core/errors.js";
-import {
-  connectCredentials,
-  connectTlsCert,
-  connectUri,
-} from "./documentdb.js";
+import { connectCredentials, connectTlsCert, connectUri } from "./documentdb.js";
 import { connectAccountKey, connectConnectionString } from "./cosmos.js";
 
 export type DocumentProvider = "documentdb" | "cosmos";
@@ -58,13 +54,9 @@ export async function getMongodb(
       return connectUri(options as Parameters<typeof connectUri>[0]);
     }
     if (has(options, "tlsCertKeyFile")) {
-      return connectTlsCert(
-        options as unknown as Parameters<typeof connectTlsCert>[0],
-      );
+      return connectTlsCert(options as unknown as Parameters<typeof connectTlsCert>[0]);
     }
-    return connectCredentials(
-      options as unknown as Parameters<typeof connectCredentials>[0],
-    );
+    return connectCredentials(options as unknown as Parameters<typeof connectCredentials>[0]);
   }
 
   if (provider === "cosmos") {
@@ -73,14 +65,10 @@ export async function getMongodb(
         options as unknown as Parameters<typeof connectConnectionString>[0],
       );
     }
-    return connectAccountKey(
-      options as unknown as Parameters<typeof connectAccountKey>[0],
-    );
+    return connectAccountKey(options as unknown as Parameters<typeof connectAccountKey>[0]);
   }
 
   throw new CloudRiftError(
-    `Unknown document DB provider: ${String(
-      provider,
-    )}. Choose 'documentdb' or 'cosmos'.`,
+    `Unknown document DB provider: ${String(provider)}. Choose 'documentdb' or 'cosmos'.`,
   );
 }

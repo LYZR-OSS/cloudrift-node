@@ -12,10 +12,7 @@ export type StorageProvider = "s3" | "azure_blob";
 
 export { StorageBackend } from "./base.js";
 export type { BinaryInput, ObjectMetadata } from "./base.js";
-export {
-  AWSS3Backend,
-  AWSS3Client,
-} from "./s3.js";
+export { AWSS3Backend, AWSS3Client } from "./s3.js";
 export type {
   AwsClientOptions,
   AwsAccessKeyOptions,
@@ -100,9 +97,7 @@ export async function getStorageClient(
         options as unknown as Parameters<typeof AWSS3Client.fromProfile>[0],
       );
     }
-    return AWSS3Client.fromIamRole(
-      options as Parameters<typeof AWSS3Client.fromIamRole>[0],
-    );
+    return AWSS3Client.fromIamRole(options as Parameters<typeof AWSS3Client.fromIamRole>[0]);
   }
 
   if (provider === "azure_blob") {

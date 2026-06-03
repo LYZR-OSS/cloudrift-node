@@ -94,9 +94,7 @@ describe("documentdb", () => {
       password: "p ss*'()!",
     });
     const inst = last();
-    expect(inst.uri).toBe(
-      "mongodb://user+name:p+ss%2A%27%28%29%21@h:27017/",
-    );
+    expect(inst.uri).toBe("mongodb://user+name:p+ss%2A%27%28%29%21@h:27017/");
   });
 
   it("credentials: defaults tls true", async () => {
@@ -166,15 +164,12 @@ describe("documentdb", () => {
     ],
   ];
 
-  it.each(docCases)(
-    "pool kwargs standardized: %o",
-    async (opts, expectedMax, expectedMin) => {
-      await getMongodb("documentdb", opts);
-      const inst = last();
-      expect(inst.options.maxPoolSize).toBe(expectedMax);
-      expect(inst.options.minPoolSize).toBe(expectedMin);
-    },
-  );
+  it.each(docCases)("pool kwargs standardized: %o", async (opts, expectedMax, expectedMin) => {
+    await getMongodb("documentdb", opts);
+    const inst = last();
+    expect(inst.options.maxPoolSize).toBe(expectedMax);
+    expect(inst.options.minPoolSize).toBe(expectedMin);
+  });
 
   it("dispatch routes uri before credentials/tlsCert", async () => {
     await getMongodb("documentdb", {
@@ -212,8 +207,7 @@ describe("cosmos", () => {
   });
 
   it("connectionString: passed through verbatim", async () => {
-    const cs =
-      "mongodb://acct:key@acct.mongo.cosmos.azure.com:10255/?ssl=true";
+    const cs = "mongodb://acct:key@acct.mongo.cosmos.azure.com:10255/?ssl=true";
     await getMongodb("cosmos", { connectionString: cs });
     expect(last().uri).toBe(cs);
   });
@@ -221,34 +215,23 @@ describe("cosmos", () => {
   const cosmosCases: Array<[Record<string, unknown>, number, number]> = [
     [{ connectionString: "mongodb://h/" }, 100, 0],
     [{ account: "a", accountKey: "k" }, 100, 0],
-    [
-      { connectionString: "mongodb://h/", maxPoolSize: 250, minPoolSize: 25 },
-      250,
-      25,
-    ],
-    [
-      { account: "a", accountKey: "k", maxPoolSize: 250, minPoolSize: 25 },
-      250,
-      25,
-    ],
+    [{ connectionString: "mongodb://h/", maxPoolSize: 250, minPoolSize: 25 }, 250, 25],
+    [{ account: "a", accountKey: "k", maxPoolSize: 250, minPoolSize: 25 }, 250, 25],
   ];
 
-  it.each(cosmosCases)(
-    "pool kwargs standardized: %o",
-    async (opts, expectedMax, expectedMin) => {
-      await getMongodb("cosmos", opts);
-      const inst = last();
-      expect(inst.options.maxPoolSize).toBe(expectedMax);
-      expect(inst.options.minPoolSize).toBe(expectedMin);
-    },
-  );
+  it.each(cosmosCases)("pool kwargs standardized: %o", async (opts, expectedMax, expectedMin) => {
+    await getMongodb("cosmos", opts);
+    const inst = last();
+    expect(inst.options.maxPoolSize).toBe(expectedMax);
+    expect(inst.options.minPoolSize).toBe(expectedMin);
+  });
 });
 
 describe("dispatch + errors", () => {
   it("unknown provider throws CloudRiftError", async () => {
-    await expect(
-      getMongodb("dynamodb" as never, { uri: "x" }),
-    ).rejects.toThrow(/Unknown document DB provider/);
+    await expect(getMongodb("dynamodb" as never, { uri: "x" })).rejects.toThrow(
+      /Unknown document DB provider/,
+    );
   });
 
   it("documentdb construction failure wrapped in DocumentConnectionError", async () => {
@@ -259,12 +242,12 @@ describe("dispatch + errors", () => {
         }
       } as never,
     );
-    await expect(
-      getMongodb("documentdb", { uri: "mongodb://broken" }),
-    ).rejects.toBeInstanceOf(DocumentConnectionError);
-    await expect(
-      getMongodb("documentdb", { uri: "mongodb://broken" }),
-    ).rejects.toThrow(/Failed to connect to DocumentDB/);
+    await expect(getMongodb("documentdb", { uri: "mongodb://broken" })).rejects.toBeInstanceOf(
+      DocumentConnectionError,
+    );
+    await expect(getMongodb("documentdb", { uri: "mongodb://broken" })).rejects.toThrow(
+      /Failed to connect to DocumentDB/,
+    );
   });
 
   it("cosmos construction failure wrapped in DocumentConnectionError", async () => {
@@ -275,8 +258,8 @@ describe("dispatch + errors", () => {
         }
       } as never,
     );
-    await expect(
-      getMongodb("cosmos", { account: "a", accountKey: "k" }),
-    ).rejects.toThrow(/Failed to connect to Cosmos DB/);
+    await expect(getMongodb("cosmos", { account: "a", accountKey: "k" })).rejects.toThrow(
+      /Failed to connect to Cosmos DB/,
+    );
   });
 });

@@ -7,14 +7,14 @@ Cloud-agnostic abstraction for **storage**, **messaging**, **document databases*
 - **Multiple auth methods per provider.** Static keys, IAM roles, profiles, managed identity, service principals, SAS tokens, mTLS, IAM auth — pick what your service already has.
 - **Lazy, optional SDKs.** Provider SDKs are optional peer dependencies, dynamically imported only when you construct a backend that needs them. Install only what you use.
 
-| Category | AWS | Azure | Self-hosted |
-|---|---|---|---|
-| Storage | S3 | Blob Storage | — |
-| Messaging | SQS | Service Bus | — |
-| Document DB | DocumentDB | Cosmos DB (MongoDB API) | — |
-| Cache | ElastiCache | Azure Cache for Redis | Redis |
-| Secrets | Secrets Manager | Key Vault | — |
-| Pub/Sub | SNS | Event Grid | — |
+| Category    | AWS             | Azure                   | Self-hosted |
+| ----------- | --------------- | ----------------------- | ----------- |
+| Storage     | S3              | Blob Storage            | —           |
+| Messaging   | SQS             | Service Bus             | —           |
+| Document DB | DocumentDB      | Cosmos DB (MongoDB API) | —           |
+| Cache       | ElastiCache     | Azure Cache for Redis   | Redis       |
+| Secrets     | Secrets Manager | Key Vault               | —           |
+| Pub/Sub     | SNS             | Event Grid              | —           |
 
 Node 20+. ESM and CommonJS builds are both shipped.
 
@@ -108,19 +108,35 @@ from the root entry (`@lyzr/cloudrift`) or per-domain subpaths
 import { getStorage } from "@lyzr/cloudrift/storage";
 
 // AWS S3
-const s3 = await getStorage("s3", { bucket: "b", region: "us-east-1" });               // IAM role
-const s3k = await getStorage("s3", { bucket: "b", awsAccessKeyId: "...",               // static keys
-  awsSecretAccessKey: "...", region: "us-east-1" });
-const s3p = await getStorage("s3", { bucket: "b", profileName: "dev" });               // ~/.aws/credentials
+const s3 = await getStorage("s3", { bucket: "b", region: "us-east-1" }); // IAM role
+const s3k = await getStorage("s3", {
+  bucket: "b",
+  awsAccessKeyId: "...", // static keys
+  awsSecretAccessKey: "...",
+  region: "us-east-1",
+});
+const s3p = await getStorage("s3", { bucket: "b", profileName: "dev" }); // ~/.aws/credentials
 
 // Azure Blob
 const blob = await getStorage("azure_blob", { connectionString: "...", container: "c" });
-const blobK = await getStorage("azure_blob", { accountUrl: "https://acct.blob.core.windows.net",
-  accountKey: "...", container: "c" });
-const blobS = await getStorage("azure_blob", { accountUrl: "...", sasToken: "...", container: "c" });
-const blobMI = await getStorage("azure_blob", { accountUrl: "...", container: "c" });  // managed identity
-const blobSP = await getStorage("azure_blob", { accountUrl: "...", container: "c",
-  tenantId: "...", clientId: "...", clientSecret: "..." });                            // service principal
+const blobK = await getStorage("azure_blob", {
+  accountUrl: "https://acct.blob.core.windows.net",
+  accountKey: "...",
+  container: "c",
+});
+const blobS = await getStorage("azure_blob", {
+  accountUrl: "...",
+  sasToken: "...",
+  container: "c",
+});
+const blobMI = await getStorage("azure_blob", { accountUrl: "...", container: "c" }); // managed identity
+const blobSP = await getStorage("azure_blob", {
+  accountUrl: "...",
+  container: "c",
+  tenantId: "...",
+  clientId: "...",
+  clientSecret: "...",
+}); // service principal
 ```
 
 **Operations** — identical on every backend:
@@ -131,11 +147,13 @@ const data: Buffer = await storage.download(key);
 await storage.delete(key);
 const exists: boolean = await storage.exists(key);
 const keys: string[] = await storage.list("logs/");
-for await (const k of storage.listIter("logs/")) { /* streamed keys */ }
+for await (const k of storage.listIter("logs/")) {
+  /* streamed keys */
+}
 const url: string = await storage.presignedUrl(key, 3600);
 await storage.copy(srcKey, dstKey /*, dstBucket */);
 await storage.move(srcKey, dstKey);
-const meta = await storage.getMetadata(key);   // { contentType, size, lastModified, etag, metadata }
+const meta = await storage.getMetadata(key); // { contentType, size, lastModified, etag, metadata }
 await storage.close();
 ```
 
@@ -161,7 +179,7 @@ const bus = await getQueue("azure_service_bus", { connectionString: "...", queue
 const busMI = await getQueue("azure_service_bus", {
   fullyQualifiedNamespace: "ns.servicebus.windows.net",
   queueName: "my-queue",
-});  // managed identity
+}); // managed identity
 ```
 
 **Operations**:
@@ -182,10 +200,10 @@ await queue.close();
 
 > **Service Bus ack note.** SQS receipt handles are stateless tokens that any client
 > can delete, so SQS `delete()` is a pure server call. Service Bus settlement is bound
-> to the *exact* receiver object that peek-locked the message. To present the same
+> to the _exact_ receiver object that peek-locked the message. To present the same
 > `receive()` / `delete(receiptHandle)` contract, the Service Bus backend uses each
 > message's **lock token** as the `receiptHandle` and tracks a `lockToken →
-> { receiver, message }` map, completing the message on its owning receiver and closing
+{ receiver, message }` map, completing the message on its owning receiver and closing
 > that receiver once its last token is acked. Consequences vs. SQS: a `receiptHandle` is
 > only meaningful **inside the process that received it**, the lock can expire, and
 > abandoned (never-deleted) messages keep their receiver open until `close()`. (This
@@ -213,7 +231,10 @@ const client = await getMongodb("documentdb", {
 });
 // or build the URI from parts (credentials are quote_plus-encoded, matching cloudrift-py):
 const c2 = await getMongodb("documentdb", {
-  host: "cluster.docdb.amazonaws.com", port: 27017, username: "admin", password: "p@ss word",
+  host: "cluster.docdb.amazonaws.com",
+  port: 27017,
+  username: "admin",
+  password: "p@ss word",
 });
 
 // Azure Cosmos DB (MongoDB API) — keys only (Cosmos for Mongo/RU rejects AAD tokens)
@@ -245,31 +266,39 @@ import { getCache } from "@lyzr/cloudrift/cache";
 // Self-hosted Redis
 const cache = await getCache("redis", "from_url", { url: "redis://localhost:6379/0" });
 const cred = await getCache("redis", "from_credentials", {
-  host: "redis.internal", port: 6379, password: "...", db: 0,
+  host: "redis.internal",
+  port: 6379,
+  password: "...",
+  db: 0,
 });
 
 // AWS ElastiCache
 const ec = await getCache("elasticache", "from_auth_token", {
-  host: "my-cluster.cache.amazonaws.com", authToken: "...",
+  host: "my-cluster.cache.amazonaws.com",
+  authToken: "...",
 });
 const ecIam = await getCache("elasticache", "from_iam_auth", {
-  host: "my-cluster.cache.amazonaws.com", username: "lyzr-app", region: "us-east-1",
-});  // SigV4 + auto-refresh on reconnect
+  host: "my-cluster.cache.amazonaws.com",
+  username: "lyzr-app",
+  region: "us-east-1",
+}); // SigV4 + auto-refresh on reconnect
 
 // Azure Cache for Redis
 const az = await getCache("azure_redis", "from_access_key", {
-  host: "my-cache.redis.cache.windows.net", accessKey: "...",
+  host: "my-cache.redis.cache.windows.net",
+  accessKey: "...",
 });
 const azMI = await getCache("azure_redis", "from_managed_identity", {
-  host: "my-cache.redis.cache.windows.net", username: "lyzr-app",
-});  // Entra token
+  host: "my-cache.redis.cache.windows.net",
+  username: "lyzr-app",
+}); // Entra token
 ```
 
 **Operations** — KV, hash, list, counters, pipeline:
 
 ```ts
 await cache.set("session:abc", "data", 3600);
-const value: Buffer | null = await cache.get("session:abc");  // Buffer, not string — see below
+const value: Buffer | null = await cache.get("session:abc"); // Buffer, not string — see below
 await cache.delete("session:abc");
 
 await cache.hset("user:1", "name", "Alice");
@@ -302,20 +331,25 @@ await cache.close();
 import { getSecrets } from "@lyzr/cloudrift/secrets";
 
 // AWS Secrets Manager
-const sm = await getSecrets("aws_secrets_manager", { region: "us-east-1" });           // IAM role
+const sm = await getSecrets("aws_secrets_manager", { region: "us-east-1" }); // IAM role
 const smK = await getSecrets("aws_secrets_manager", {
-  awsAccessKeyId: "...", awsSecretAccessKey: "...", region: "us-east-1",
+  awsAccessKeyId: "...",
+  awsSecretAccessKey: "...",
+  region: "us-east-1",
 });
 
 // Azure Key Vault
 const kv = await getSecrets("azure_keyvault", { vaultUrl: "https://v.vault.azure.net" }); // managed identity
 const kvSP = await getSecrets("azure_keyvault", {
-  vaultUrl: "https://v.vault.azure.net", tenantId: "...", clientId: "...", clientSecret: "...",
+  vaultUrl: "https://v.vault.azure.net",
+  tenantId: "...",
+  clientId: "...",
+  clientSecret: "...",
 });
 
 const value = await sm.getSecret("db/password");
-const obj = await sm.getSecretJson("db/config");   // getSecret + JSON.parse
-await sm.setSecret("db/password", "new-value");    // creates the secret if absent (AWS)
+const obj = await sm.getSecretJson("db/config"); // getSecret + JSON.parse
+await sm.setSecret("db/password", "new-value"); // creates the secret if absent (AWS)
 await sm.deleteSecret("db/password");
 const names = await sm.listSecrets("db/");
 await sm.close();
@@ -332,13 +366,16 @@ import { getPubsub } from "@lyzr/cloudrift/pubsub";
 const sns = await getPubsub("sns", { region: "us-east-1" });
 
 // Azure Event Grid
-const eg = await getPubsub("azure_eventgrid", { endpoint: "https://t.region.eventgrid.azure.net/api/events",
-  accessKey: "..." });
+const eg = await getPubsub("azure_eventgrid", {
+  endpoint: "https://t.region.eventgrid.azure.net/api/events",
+  accessKey: "...",
+});
 
 const id = await sns.publish("arn:aws:sns:...:topic", "hello", { trace: "abc" });
 const ids = await sns.publishBatch("arn:aws:sns:...:topic", [
-  { message: "a" }, { message: "b", attributes: { k: "v" } },
-]);  // SNS chunks at 10 per request
+  { message: "a" },
+  { message: "b", attributes: { k: "v" } },
+]); // SNS chunks at 10 per request
 await sns.close();
 ```
 
@@ -357,8 +394,13 @@ as the Python port (S3 `maxPoolConnections=50`, `connectTimeout=10s`, `readTimeo
 SQS the same; Secrets Manager pool `25`, read `30s`):
 
 ```ts
-await getStorage("s3", { bucket: "b", region: "us-east-1",
-  maxPoolConnections: 100, connectTimeout: 5, readTimeout: 30 });
+await getStorage("s3", {
+  bucket: "b",
+  region: "us-east-1",
+  maxPoolConnections: 100,
+  connectTimeout: 5,
+  readTimeout: 30,
+});
 
 await getMongodb("documentdb", { uri: "...", maxPoolSize: 200, minPoolSize: 10 });
 ```
@@ -401,7 +443,9 @@ import { ObjectNotFoundError } from "@lyzr/cloudrift";
 try {
   await storage.download("missing.txt");
 } catch (err) {
-  if (err instanceof ObjectNotFoundError) { /* ... */ }
+  if (err instanceof ObjectNotFoundError) {
+    /* ... */
+  }
 }
 ```
 
@@ -415,21 +459,21 @@ propagate as native `mongodb` errors; only connect-time failures surface as
 
 ## Provider / auth matrix
 
-| Domain | Provider string | Auth methods (inferred from option keys, except cache) |
-|---|---|---|
-| Storage | `s3` | `awsAccessKeyId` → access key · `profileName` → profile · else IAM role |
-| Storage | `azure_blob` | `connectionString` · `accountKey` · `sasToken` · `clientSecret` → service principal · else managed identity |
-| Messaging | `sqs` | `awsAccessKeyId` · `profileName` · else IAM role |
-| Messaging | `azure_service_bus` | `connectionString` · `clientSecret` → service principal · else managed identity |
-| Secrets | `aws_secrets_manager` | `awsAccessKeyId` · `profileName` · else IAM role |
-| Secrets | `azure_keyvault` | `clientSecret` → service principal · else managed identity |
-| Pub/Sub | `sns` | `awsAccessKeyId` · `profileName` · else IAM role |
-| Pub/Sub | `azure_eventgrid` | `accessKey` · `clientSecret` → service principal · else managed identity |
-| Document | `documentdb` | `uri` · `tlsCertKeyFile` → mTLS · else credentials |
-| Document | `cosmos` | `connectionString` · `accountKey` |
-| Cache | `redis` | `from_url` · `from_credentials` · `from_tls_cert` |
-| Cache | `elasticache` | `from_auth_token` · `from_iam_auth` · `from_tls_cert` |
-| Cache | `azure_redis` | `from_access_key` · `from_managed_identity` · `from_service_principal` |
+| Domain    | Provider string       | Auth methods (inferred from option keys, except cache)                                                      |
+| --------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Storage   | `s3`                  | `awsAccessKeyId` → access key · `profileName` → profile · else IAM role                                     |
+| Storage   | `azure_blob`          | `connectionString` · `accountKey` · `sasToken` · `clientSecret` → service principal · else managed identity |
+| Messaging | `sqs`                 | `awsAccessKeyId` · `profileName` · else IAM role                                                            |
+| Messaging | `azure_service_bus`   | `connectionString` · `clientSecret` → service principal · else managed identity                             |
+| Secrets   | `aws_secrets_manager` | `awsAccessKeyId` · `profileName` · else IAM role                                                            |
+| Secrets   | `azure_keyvault`      | `clientSecret` → service principal · else managed identity                                                  |
+| Pub/Sub   | `sns`                 | `awsAccessKeyId` · `profileName` · else IAM role                                                            |
+| Pub/Sub   | `azure_eventgrid`     | `accessKey` · `clientSecret` → service principal · else managed identity                                    |
+| Document  | `documentdb`          | `uri` · `tlsCertKeyFile` → mTLS · else credentials                                                          |
+| Document  | `cosmos`              | `connectionString` · `accountKey`                                                                           |
+| Cache     | `redis`               | `from_url` · `from_credentials` · `from_tls_cert`                                                           |
+| Cache     | `elasticache`         | `from_auth_token` · `from_iam_auth` · `from_tls_cert`                                                       |
+| Cache     | `azure_redis`         | `from_access_key` · `from_managed_identity` · `from_service_principal`                                      |
 
 Cache uses an explicit `authMethod` argument (snake_case config strings); all other
 domains infer the auth method from which option keys you pass, with the precedence shown

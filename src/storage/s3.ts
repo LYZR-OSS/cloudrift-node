@@ -17,11 +17,7 @@ import type {
 } from "@aws-sdk/client-s3";
 import type { AwsCredentialIdentity } from "@aws-sdk/types";
 
-import {
-  ObjectNotFoundError,
-  StorageError,
-  StoragePermissionError,
-} from "../core/errors.js";
+import { ObjectNotFoundError, StorageError, StoragePermissionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 import { StorageBackend } from "./base.js";
 import type { BinaryInput, ObjectMetadata } from "./base.js";
@@ -133,9 +129,7 @@ export class AWSS3Client {
   }
 
   static fromIamRole(opts: AwsIamRoleOptions = {}): AWSS3Client {
-    return new AWSS3Client(
-      buildFactoryConfig(opts, { region: opts.region ?? DEFAULT_REGION }),
-    );
+    return new AWSS3Client(buildFactoryConfig(opts, { region: opts.region ?? DEFAULT_REGION }));
   }
 
   static fromProfile(opts: AwsProfileOptions): AWSS3Client {
@@ -350,10 +344,7 @@ export class AWSS3Backend extends StorageBackend {
   async presignedUrl(key: string, expiresIn = 3600): Promise<string> {
     const [client, mod] = await Promise.all([this._client.ensure(), this.mod()]);
     try {
-      const { getSignedUrl } = await loadOptional<PresignerModule>(
-        PRESIGNER_PKG,
-        PROVIDER,
-      );
+      const { getSignedUrl } = await loadOptional<PresignerModule>(PRESIGNER_PKG, PROVIDER);
       return await getSignedUrl(
         client,
         new mod.GetObjectCommand({ Bucket: this.bucket, Key: key }),

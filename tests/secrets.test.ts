@@ -9,11 +9,7 @@ import {
 import { mockClient } from "aws-sdk-client-mock";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  SecretError,
-  SecretNotFoundError,
-  SecretPermissionError,
-} from "../src/core/errors.js";
+import { SecretError, SecretNotFoundError, SecretPermissionError } from "../src/core/errors.js";
 import { getSecrets } from "../src/secrets/index.js";
 
 const smMock = mockClient(SecretsManagerClient);
@@ -53,9 +49,7 @@ describe("AWSSecretsManagerBackend", () => {
   });
 
   it("set falls back to create when the secret does not exist", async () => {
-    smMock
-      .on(PutSecretValueCommand)
-      .rejects(awsError("ResourceNotFoundException"));
+    smMock.on(PutSecretValueCommand).rejects(awsError("ResourceNotFoundException"));
     smMock.on(CreateSecretCommand).resolves({ ARN: "arn", Name: "new/secret" });
 
     const backend = await makeBackend();
@@ -82,9 +76,7 @@ describe("AWSSecretsManagerBackend", () => {
   });
 
   it("gets a secret value", async () => {
-    smMock
-      .on(GetSecretValueCommand)
-      .resolves({ SecretString: "s3cr3t-value" });
+    smMock.on(GetSecretValueCommand).resolves({ SecretString: "s3cr3t-value" });
 
     const backend = await makeBackend();
     expect(await backend.getSecret("my/secret")).toBe("s3cr3t-value");
@@ -106,9 +98,7 @@ describe("AWSSecretsManagerBackend", () => {
 
   it("parses a JSON secret", async () => {
     const payload = { db_host: "localhost", db_port: 5432 };
-    smMock
-      .on(GetSecretValueCommand)
-      .resolves({ SecretString: JSON.stringify(payload) });
+    smMock.on(GetSecretValueCommand).resolves({ SecretString: JSON.stringify(payload) });
 
     const backend = await makeBackend();
     expect(await backend.getSecretJson("json/secret")).toEqual(payload);
@@ -119,9 +109,7 @@ describe("AWSSecretsManagerBackend", () => {
     smMock.on(GetSecretValueCommand).resolves({ SecretString: "not json{" });
 
     const backend = await makeBackend();
-    await expect(backend.getSecretJson("bad/json")).rejects.toBeInstanceOf(
-      SecretError,
-    );
+    await expect(backend.getSecretJson("bad/json")).rejects.toBeInstanceOf(SecretError);
     await backend.close();
   });
 
@@ -172,14 +160,10 @@ describe("AWSSecretsManagerBackend", () => {
   });
 
   it("maps ResourceNotFoundException to SecretNotFoundError", async () => {
-    smMock
-      .on(GetSecretValueCommand)
-      .rejects(awsError("ResourceNotFoundException"));
+    smMock.on(GetSecretValueCommand).rejects(awsError("ResourceNotFoundException"));
 
     const backend = await makeBackend();
-    await expect(backend.getSecret("missing")).rejects.toBeInstanceOf(
-      SecretNotFoundError,
-    );
+    await expect(backend.getSecret("missing")).rejects.toBeInstanceOf(SecretNotFoundError);
     await backend.close();
   });
 
@@ -187,9 +171,7 @@ describe("AWSSecretsManagerBackend", () => {
     smMock.on(GetSecretValueCommand).rejects(awsError("AccessDeniedException"));
 
     const backend = await makeBackend();
-    await expect(backend.getSecret("denied")).rejects.toBeInstanceOf(
-      SecretPermissionError,
-    );
+    await expect(backend.getSecret("denied")).rejects.toBeInstanceOf(SecretPermissionError);
     await backend.close();
   });
 
@@ -213,10 +195,7 @@ describe("AWSSecretsManagerBackend", () => {
 describe("getSecrets factory", () => {
   it("throws for an unknown provider", async () => {
     await expect(
-      getSecrets(
-        "gcp_secret_manager" as unknown as "aws_secrets_manager",
-        { project: "my-proj" },
-      ),
+      getSecrets("gcp_secret_manager" as unknown as "aws_secrets_manager", { project: "my-proj" }),
     ).rejects.toThrow(/Unknown secrets provider/);
   });
 });

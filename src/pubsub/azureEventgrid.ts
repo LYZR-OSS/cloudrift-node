@@ -7,10 +7,7 @@
 
 import type { randomUUID as RandomUUID } from "node:crypto";
 import { randomUUID } from "node:crypto";
-import type {
-  EventGridPublisherClient,
-  SendCloudEventInput,
-} from "@azure/eventgrid";
+import type { EventGridPublisherClient, SendCloudEventInput } from "@azure/eventgrid";
 import type { KeyCredential } from "@azure/core-auth";
 import type { TokenCredential } from "@azure/core-auth";
 
@@ -72,10 +69,7 @@ export class AzureEventGridBackend extends PubSubBackend {
     });
   }
 
-  static fromManagedIdentity(opts: {
-    endpoint: string;
-    clientId?: string;
-  }): AzureEventGridBackend {
+  static fromManagedIdentity(opts: { endpoint: string; clientId?: string }): AzureEventGridBackend {
     return new AzureEventGridBackend(async () => {
       const mod = await loadOptional<EventGridModule>(EVENTGRID_PKG, PROVIDER);
       const identity = await loadOptional<IdentityModule>(IDENTITY_PKG, PROVIDER);
@@ -128,9 +122,7 @@ export class AzureEventGridBackend extends PubSubBackend {
   override async close(): Promise<void> {
     // Mirror Python close(): always release the publisher client's HTTP
     // transport first, then conditionally close the credential.
-    const client = this.client as
-      | { close?: () => Promise<void> | void }
-      | undefined;
+    const client = this.client as { close?: () => Promise<void> | void } | undefined;
     if (client !== undefined && typeof client.close === "function") {
       await client.close();
     }

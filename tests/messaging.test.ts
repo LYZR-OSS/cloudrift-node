@@ -88,14 +88,10 @@ describe("AWSSQSBackend", () => {
   it("sendBatch throws MessageSendError when an entry fails", async () => {
     sqsMock.on(SendMessageBatchCommand).resolves({
       Successful: [{ Id: "0", MessageId: "a", MD5OfMessageBody: "x" }],
-      Failed: [
-        { Id: "1", SenderFault: true, Code: "InternalError", Message: "boom" },
-      ],
+      Failed: [{ Id: "1", SenderFault: true, Code: "InternalError", Message: "boom" }],
     });
 
-    await expect(backend.sendBatch([{ n: 1 }, { n: 2 }])).rejects.toBeInstanceOf(
-      MessageSendError,
-    );
+    await expect(backend.sendBatch([{ n: 1 }, { n: 2 }])).rejects.toBeInstanceOf(MessageSendError);
   });
 
   it("receive parses JSON bodies and returns the Message shape", async () => {
@@ -160,9 +156,7 @@ describe("AWSSQSBackend", () => {
   });
 
   it("healthCheck calls GetQueueAttributes with QueueArn", async () => {
-    sqsMock
-      .on(GetQueueAttributesCommand)
-      .resolves({ Attributes: { QueueArn: "arn:aws:sqs:..." } });
+    sqsMock.on(GetQueueAttributesCommand).resolves({ Attributes: { QueueArn: "arn:aws:sqs:..." } });
 
     const ok = await backend.healthCheck();
 
@@ -288,7 +282,11 @@ vi.mock("@azure/service-bus", () => {
 
 vi.mock("@azure/identity", () => {
   class ClientSecretCredential {
-    constructor(public tenantId: string, public clientId: string, public secret: string) {}
+    constructor(
+      public tenantId: string,
+      public clientId: string,
+      public secret: string,
+    ) {}
     async close(): Promise<void> {}
   }
   class ManagedIdentityCredential {
@@ -341,10 +339,7 @@ describe("AzureServiceBusBackend", () => {
     expect(ids).toEqual(["", "", ""]);
     expect(sbHarness.senders[0].sent).toHaveLength(2);
     expect(sbHarness.senders[0].sent[0]).toMatchObject({
-      messages: [
-        { body: JSON.stringify({ n: 1 }) },
-        { body: JSON.stringify({ n: 2 }) },
-      ],
+      messages: [{ body: JSON.stringify({ n: 1 }) }, { body: JSON.stringify({ n: 2 }) }],
     });
     expect(sbHarness.senders[0].sent[1]).toMatchObject({
       messages: [{ body: JSON.stringify({ n: 3 }) }],
@@ -414,9 +409,7 @@ describe("AzureServiceBusBackend", () => {
     // createReceiver builds ONE FakeReceiver whose own internal script drains;
     // purge() loops on that single receiver, so seed its first batch via the
     // harness and rely on the FakeReceiver returning [] thereafter.
-    sbHarness.receiveScript = [
-      [{ lockToken: "a" }, { lockToken: "b" }],
-    ];
+    sbHarness.receiveScript = [[{ lockToken: "a" }, { lockToken: "b" }]];
     await b.purge();
     const receiver = sbHarness.receivers[0];
     expect(receiver.completed).toHaveLength(2);

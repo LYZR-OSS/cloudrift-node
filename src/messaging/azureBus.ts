@@ -108,9 +108,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
   // ------------------------------------------------------------------
 
   /** Authenticate with a Service Bus connection string. */
-  static fromConnectionString(
-    opts: AzureBusConnectionStringOptions,
-  ): AzureServiceBusBackend {
+  static fromConnectionString(opts: AzureBusConnectionStringOptions): AzureServiceBusBackend {
     return new AzureServiceBusBackend({
       queueName: opts.queueName,
       connectionString: opts.connectionString,
@@ -118,9 +116,7 @@ export class AzureServiceBusBackend extends MessagingBackend {
   }
 
   /** Authenticate via Azure Managed Identity (system or user-assigned). */
-  static fromManagedIdentity(
-    opts: AzureBusManagedIdentityOptions,
-  ): AzureServiceBusBackend {
+  static fromManagedIdentity(opts: AzureBusManagedIdentityOptions): AzureServiceBusBackend {
     return new AzureServiceBusBackend({
       queueName: opts.queueName,
       fullyQualifiedNamespace: opts.fullyQualifiedNamespace,
@@ -132,18 +128,12 @@ export class AzureServiceBusBackend extends MessagingBackend {
   }
 
   /** Authenticate via Azure AD service principal (client secret). */
-  static fromServicePrincipal(
-    opts: AzureBusServicePrincipalOptions,
-  ): AzureServiceBusBackend {
+  static fromServicePrincipal(opts: AzureBusServicePrincipalOptions): AzureServiceBusBackend {
     return new AzureServiceBusBackend({
       queueName: opts.queueName,
       fullyQualifiedNamespace: opts.fullyQualifiedNamespace,
       credentialFactory: (identity) =>
-        new identity.ClientSecretCredential(
-          opts.tenantId,
-          opts.clientId,
-          opts.clientSecret,
-        ),
+        new identity.ClientSecretCredential(opts.tenantId, opts.clientId, opts.clientSecret),
     });
   }
 
@@ -163,13 +153,8 @@ export class AzureServiceBusBackend extends MessagingBackend {
     if (this.init.connectionString) {
       this.client = new sdk.ServiceBusClient(this.init.connectionString);
     } else {
-      const identity = await loadOptional<IdentityModule>(
-        IDENTITY_PACKAGE,
-        PROVIDER,
-      );
-      const credential = this.init.credentialFactory!(identity) as
-        & ClosableCredential
-        & object;
+      const identity = await loadOptional<IdentityModule>(IDENTITY_PACKAGE, PROVIDER);
+      const credential = this.init.credentialFactory!(identity) as ClosableCredential & object;
       this.credential = credential;
       this.client = new sdk.ServiceBusClient(
         this.init.fullyQualifiedNamespace!,
@@ -234,17 +219,13 @@ export class AzureServiceBusBackend extends MessagingBackend {
         const message = { body: JSON.stringify(m) };
         if (!batch.tryAddMessage(message)) {
           if (batchSize === 0) {
-            throw new MessageSendError(
-              "Message is too large for an Azure Service Bus batch",
-            );
+            throw new MessageSendError("Message is too large for an Azure Service Bus batch");
           }
           await sender.sendMessages(batch);
           batch = await sender.createMessageBatch();
           batchSize = 0;
           if (!batch.tryAddMessage(message)) {
-            throw new MessageSendError(
-              "Message is too large for an Azure Service Bus batch",
-            );
+            throw new MessageSendError("Message is too large for an Azure Service Bus batch");
           }
         }
         batchSize += 1;

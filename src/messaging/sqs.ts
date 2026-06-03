@@ -7,11 +7,7 @@ import type {
 } from "@aws-sdk/client-sqs";
 
 import { loadOptional } from "../core/lazy.js";
-import {
-  MessageSendError,
-  MessagingError,
-  QueueNotFoundError,
-} from "../core/errors.js";
+import { MessageSendError, MessagingError, QueueNotFoundError } from "../core/errors.js";
 import { MessagingBackend, type Message } from "./base.js";
 
 const PROVIDER = "sqs";
@@ -149,11 +145,9 @@ export class AWSSQSBackend extends MessagingBackend {
     // Apply transport tuning (pool size + timeouts), mirroring Python's
     // botocore Config(max_pool_connections=50, connect_timeout=10,
     // read_timeout=60). Defaults match Python when the caller leaves them unset.
-    const connectTimeout =
-      this.init.connectTimeout ?? DEFAULT_CONNECT_TIMEOUT;
+    const connectTimeout = this.init.connectTimeout ?? DEFAULT_CONNECT_TIMEOUT;
     const readTimeout = this.init.readTimeout ?? DEFAULT_READ_TIMEOUT;
-    const maxPoolConnections =
-      this.init.maxPoolConnections ?? DEFAULT_MAX_POOL_CONNECTIONS;
+    const maxPoolConnections = this.init.maxPoolConnections ?? DEFAULT_MAX_POOL_CONNECTIONS;
     const config: SQSClientConfig = {
       region: this.init.region,
       requestHandler: {
@@ -172,9 +166,10 @@ export class AWSSQSBackend extends MessagingBackend {
         sessionToken: this.init.credentials.sessionToken,
       };
     } else if (this.init.profile !== undefined) {
-      const credsMod = await loadOptional<
-        typeof import("@aws-sdk/credential-providers")
-      >("@aws-sdk/credential-providers", PROVIDER);
+      const credsMod = await loadOptional<typeof import("@aws-sdk/credential-providers")>(
+        "@aws-sdk/credential-providers",
+        PROVIDER,
+      );
       config.credentials = credsMod.fromIni({ profile: this.init.profile });
     }
     this.client = new sdk.SQSClient(config);
@@ -218,9 +213,7 @@ export class AWSSQSBackend extends MessagingBackend {
       );
       if (response.Failed && response.Failed.length > 0) {
         const failed = response.Failed.map((f) => f.Id);
-        throw new MessageSendError(
-          `Failed to send messages with IDs: ${JSON.stringify(failed)}`,
-        );
+        throw new MessageSendError(`Failed to send messages with IDs: ${JSON.stringify(failed)}`);
       }
       return (response.Successful ?? []).map((s) => s.MessageId ?? "");
     } catch (err) {
@@ -270,9 +263,7 @@ export class AWSSQSBackend extends MessagingBackend {
     const client = await this.ensure();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
     try {
-      await client.send(
-        new sdk.PurgeQueueCommand({ QueueUrl: this.queueUrl }),
-      );
+      await client.send(new sdk.PurgeQueueCommand({ QueueUrl: this.queueUrl }));
     } catch (err) {
       throw this.mapError(err);
     }
@@ -308,10 +299,7 @@ export class AWSSQSBackend extends MessagingBackend {
       return err;
     }
     const code = errorCode(err);
-    if (
-      code === "AWS.SimpleQueueService.NonExistentQueue" ||
-      code === "QueueDoesNotExist"
-    ) {
+    if (code === "AWS.SimpleQueueService.NonExistentQueue" || code === "QueueDoesNotExist") {
       return new QueueNotFoundError(`Queue not found: ${this.queueUrl}`, {
         cause: err,
       });

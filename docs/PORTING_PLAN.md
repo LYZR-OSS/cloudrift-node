@@ -8,14 +8,14 @@ semantics and an idiomatic-TypeScript public API.
 Cloudrift is a cloud-agnostic infrastructure abstraction library for Lyzr microservices.
 It provides unified async APIs across AWS, Azure, and self-hosted backends:
 
-| Domain    | AWS                  | Azure                  | Self-hosted |
-|-----------|----------------------|------------------------|-------------|
-| storage   | S3                   | Blob Storage           | —           |
-| messaging | SQS                  | Service Bus            | —           |
-| document  | DocumentDB (Mongo)   | Cosmos DB (Mongo API)  | —           |
-| cache     | ElastiCache (Redis)  | Azure Cache for Redis  | Redis       |
-| secrets   | Secrets Manager      | Key Vault              | —           |
-| pubsub    | SNS                  | Event Grid             | —           |
+| Domain    | AWS                 | Azure                 | Self-hosted |
+| --------- | ------------------- | --------------------- | ----------- |
+| storage   | S3                  | Blob Storage          | —           |
+| messaging | SQS                 | Service Bus           | —           |
+| document  | DocumentDB (Mongo)  | Cosmos DB (Mongo API) | —           |
+| cache     | ElastiCache (Redis) | Azure Cache for Redis | Redis       |
+| secrets   | Secrets Manager     | Key Vault             | —           |
+| pubsub    | SNS                 | Event Grid            | —           |
 
 Core constraints carried over from the Python design (see `cloudrift-py/docs/DESIGN.md`):
 
@@ -33,35 +33,35 @@ Core constraints carried over from the Python design (see `cloudrift-py/docs/DES
 
 ## 2. Target stack
 
-| Concern        | Choice |
-|----------------|--------|
-| Package name   | `@lyzr/cloudrift` |
-| Language       | TypeScript 5.x, `strict: true` |
-| Runtime        | Node.js >= 20 |
-| Module format  | ESM + CJS dual build via `tsup` |
-| Entry points   | Subpath exports: `@lyzr/cloudrift`, `./storage`, `./messaging`, `./cache`, `./secrets`, `./pubsub`, `./document`, `./core` |
-| Tests          | `vitest` |
-| Lint/format    | `eslint` (typescript-eslint) + `prettier` |
-| Package manager| `npm` |
+| Concern         | Choice                                                                                                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Package name    | `@lyzr/cloudrift`                                                                                                          |
+| Language        | TypeScript 5.x, `strict: true`                                                                                             |
+| Runtime         | Node.js >= 20                                                                                                              |
+| Module format   | ESM + CJS dual build via `tsup`                                                                                            |
+| Entry points    | Subpath exports: `@lyzr/cloudrift`, `./storage`, `./messaging`, `./cache`, `./secrets`, `./pubsub`, `./document`, `./core` |
+| Tests           | `vitest`                                                                                                                   |
+| Lint/format     | `eslint` (typescript-eslint) + `prettier`                                                                                  |
+| Package manager | `npm`                                                                                                                      |
 
 ### Dependency mapping (Python → npm)
 
-| Python                          | npm |
-|---------------------------------|-----|
-| `aioboto3` (S3)                 | `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` |
-| `aioboto3` (SQS)                | `@aws-sdk/client-sqs` |
-| `aioboto3` (SNS)                | `@aws-sdk/client-sns` |
-| `aioboto3` (Secrets Manager)    | `@aws-sdk/client-secrets-manager` |
-| profile auth                    | `@aws-sdk/credential-providers` (`fromIni`) |
-| `azure-storage-blob`            | `@azure/storage-blob` |
-| `azure-servicebus`              | `@azure/service-bus` |
-| `azure-keyvault-secrets`        | `@azure/keyvault-secrets` |
-| `azure-eventgrid`               | `@azure/eventgrid` |
-| `azure-identity`                | `@azure/identity` |
-| `redis[hiredis]`                | `ioredis` |
-| `motor`                         | `mongodb` (native async driver) |
-| `moto` (tests)                  | `aws-sdk-client-mock` |
-| `fakeredis` (tests)             | `ioredis-mock` |
+| Python                       | npm                                                    |
+| ---------------------------- | ------------------------------------------------------ |
+| `aioboto3` (S3)              | `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` |
+| `aioboto3` (SQS)             | `@aws-sdk/client-sqs`                                  |
+| `aioboto3` (SNS)             | `@aws-sdk/client-sns`                                  |
+| `aioboto3` (Secrets Manager) | `@aws-sdk/client-secrets-manager`                      |
+| profile auth                 | `@aws-sdk/credential-providers` (`fromIni`)            |
+| `azure-storage-blob`         | `@azure/storage-blob`                                  |
+| `azure-servicebus`           | `@azure/service-bus`                                   |
+| `azure-keyvault-secrets`     | `@azure/keyvault-secrets`                              |
+| `azure-eventgrid`            | `@azure/eventgrid`                                     |
+| `azure-identity`             | `@azure/identity`                                      |
+| `redis[hiredis]`             | `ioredis`                                              |
+| `motor`                      | `mongodb` (native async driver)                        |
+| `moto` (tests)               | `aws-sdk-client-mock`                                  |
+| `fakeredis` (tests)          | `ioredis-mock`                                         |
 
 **Optional install strategy.** Python uses extras (`pip install lyzr-cloudrift[aws]`).
 npm has no extras, so all provider SDKs are declared as **optional `peerDependencies`**
@@ -73,18 +73,18 @@ Test devDependencies include all SDKs.
 
 ## 3. API translation conventions
 
-| Python                              | TypeScript |
-|-------------------------------------|------------|
-| `get_storage(provider, **kwargs)`   | `getStorage(provider, options)` — discriminated options object |
-| `from_access_key(...)` classmethods | `static fromAccessKey(opts)` |
-| snake_case methods/params           | camelCase (`getSecretJson`, `presignedUrl`, `expiresIn`) |
-| `bytes`                             | `Buffer` (accept `Buffer \| Uint8Array \| string` on input, return `Buffer`) |
-| `dict` message bodies               | `Record<string, unknown>` (JSON-serializable) |
-| `AsyncIterator[bytes]`              | `AsyncIterable<Buffer \| Uint8Array>` |
-| `async with backend:`               | `await using backend = ...` (`Symbol.asyncDispose`) plus explicit `close()` |
-| ABC (`StorageBackend`)              | `abstract class` (kept as classes, not interfaces, to preserve default method impls: `move`, `healthCheck`, `listIter`, `setex`) |
-| Exceptions                          | `class ObjectNotFoundError extends StorageError extends CloudRiftError extends Error`, with `cause` set to the provider error |
-| `@dataclass Message`                | `interface Message` |
+| Python                              | TypeScript                                                                                                                                                                                                                                                                                          |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_storage(provider, **kwargs)`   | `getStorage(provider, options)` — discriminated options object                                                                                                                                                                                                                                      |
+| `from_access_key(...)` classmethods | `static fromAccessKey(opts)`                                                                                                                                                                                                                                                                        |
+| snake_case methods/params           | camelCase (`getSecretJson`, `presignedUrl`, `expiresIn`)                                                                                                                                                                                                                                            |
+| `bytes`                             | `Buffer` (accept `Buffer \| Uint8Array \| string` on input, return `Buffer`)                                                                                                                                                                                                                        |
+| `dict` message bodies               | `Record<string, unknown>` (JSON-serializable)                                                                                                                                                                                                                                                       |
+| `AsyncIterator[bytes]`              | `AsyncIterable<Buffer \| Uint8Array>`                                                                                                                                                                                                                                                               |
+| `async with backend:`               | `await using backend = ...` (`Symbol.asyncDispose`) plus explicit `close()`                                                                                                                                                                                                                         |
+| ABC (`StorageBackend`)              | `abstract class` (kept as classes, not interfaces, to preserve default method impls: `move`, `healthCheck`, `listIter`, `setex`)                                                                                                                                                                    |
+| Exceptions                          | `class ObjectNotFoundError extends StorageError extends CloudRiftError extends Error`, with `cause` set to the provider error                                                                                                                                                                       |
+| `@dataclass Message`                | `interface Message`                                                                                                                                                                                                                                                                                 |
 | Provider strings                    | identical literals: `"s3" \| "azure_blob"`, `"sqs" \| "azure_service_bus"`, `"redis" \| "elasticache" \| "azure_redis"`, `"aws_secrets_manager" \| "azure_keyvault"`, `"sns" \| "azure_eventgrid"`, `"documentdb" \| "cosmos"` — must match Python so env-driven config is portable across services |
 
 Factory auth dispatch is preserved: the factory inspects which option keys are present
@@ -98,10 +98,12 @@ Each module ports `base` (abstract class + defaults), provider adapters, factory
 contract tests. Full type signatures are in `ARCHITECTURE.md`.
 
 ### 4.1 core
+
 - `errors.ts`: full exception tree (22 classes) mirroring `cloudrift/core/exceptions.py`.
 - `lazy.ts`: helper for lazy SDK loading with clear missing-dependency errors.
 
 ### 4.2 storage (S3, Azure Blob)
+
 - `StorageBackend` abstract class: `upload`, `download`, `delete`, `exists`, `list`,
   `listIter`, `presignedUrl`, `copy`, `move` (default = copy+delete), `getMetadata`,
   `uploadStream`, `healthCheck` (default = `exists("__cloudrift_health__")`), `close`.
@@ -118,9 +120,10 @@ contract tests. Full type signatures are in `ARCHITECTURE.md`.
   else `StorageError`.
 
 ### 4.3 messaging (SQS, Service Bus)
+
 - `Message` interface: `{ id, body, receiptHandle, attributes }`.
 - `MessagingBackend`: `send(message, delay=0)`, `sendBatch`, `receive(maxMessages=1,
-  waitTime=0)`, `delete(receiptHandle)` (ack), `purge`, `healthCheck`, `close`.
+waitTime=0)`, `delete(receiptHandle)` (ack), `purge`, `healthCheck`, `close`.
 - SQS: JSON-serialize bodies; `DelaySeconds`; batch via `SendMessageBatch` with `Failed`
   checking.
 - Service Bus: single AMQP connection; receiver + lock-token tracking so `delete()` can
@@ -129,6 +132,7 @@ contract tests. Full type signatures are in `ARCHITECTURE.md`.
   mismatch with SQS (documented, not redesigned in this port — parity first).
 
 ### 4.4 document (DocumentDB, Cosmos — Mongo API)
+
 - `getMongodb(provider, options)` returns a **native `MongoClient`** from the `mongodb`
   package — no wrapper (matches the v0.2.0 Motor-direct design).
 - DocumentDB helpers: `connectUri`, `connectCredentials` (URI-encodes user/pass),
@@ -141,6 +145,7 @@ contract tests. Full type signatures are in `ARCHITECTURE.md`.
   synchronous/URI-parse failures as `DocumentConnectionError`.
 
 ### 4.5 cache (Redis ×3)
+
 - `CacheBackend` abstract class with full op set (KV, hash, list, counters, multi-key,
   admin, `pipeline()`).
 - `RedisMixin` equivalent: a concrete `BaseRedisBackend extends CacheBackend` holding an
@@ -155,6 +160,7 @@ contract tests. Full type signatures are in `ARCHITECTURE.md`.
 - Factory keeps the two-arg shape: `getCache(provider, authMethod, options)`.
 
 ### 4.6 secrets (Secrets Manager, Key Vault)
+
 - `SecretBackend`: `getSecret`, `getSecretJson`, `setSecret` (put-then-create-on-404),
   `deleteSecret` (force, no recovery), `listSecrets(prefix)`,
   `healthCheck` (default = `listSecrets("__cloudrift_health__")`), `close`.
@@ -164,25 +170,26 @@ contract tests. Full type signatures are in `ARCHITECTURE.md`.
   `SecretPermissionError`; JSON parse failure → `SecretError`.
 
 ### 4.7 pubsub (SNS, Event Grid)
+
 - `PubSubBackend`: `publish(topic, message, attributes?)`, `publishBatch(topic,
-  messages)`, `healthCheck`, `close`.
+messages)`, `healthCheck`, `close`.
 - SNS: string attributes → `MessageAttributes` (DataType `String`); batch auto-chunked
   at 10 with `Failed` checking; health check via `listTopics`.
 - Event Grid: wrap each message in a CloudEvent (`type: "cloudrift.event"`, `source:
-  topic`, random UUID id, attributes as extensions); `healthCheck` returns `true`.
+topic`, random UUID id, attributes as extensions); `healthCheck` returns `true`.
 
 ## 5. Testing strategy
 
 Mirror the Python test suite 1:1 in intent (≈93 tests across 6 files):
 
-| Suite                | Mocking approach |
-|----------------------|------------------|
-| `cache.test.ts`      | `ioredis-mock` (parity with fakeredis): KV/TTL/hash/list/counters/mget/mset, factory dispatch, invalid provider |
-| `storage.test.ts`    | `aws-sdk-client-mock` on `S3Client`: upload/download/delete/exists/list/listIter/metadata/copy/move/presigned/uploadStream; client/backend split & view ownership |
-| `messaging.test.ts`  | `aws-sdk-client-mock` on `SQSClient`: send/sendBatch/receive/delete/purge/healthCheck, invalid provider |
-| `secrets.test.ts`    | `aws-sdk-client-mock` on `SecretsManagerClient`: CRUD, JSON, prefix list, create-on-404 fallback, error mapping |
-| `pubsub.test.ts`     | `aws-sdk-client-mock` on `SNSClient`: publish, attributes, batch >10 chunking, healthCheck |
-| `document.test.ts`   | Recording/DI of `MongoClient` constructor (no real connections): URI building, pool defaults/overrides, password URL-encoding, Cosmos URI construction |
+| Suite               | Mocking approach                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cache.test.ts`     | `ioredis-mock` (parity with fakeredis): KV/TTL/hash/list/counters/mget/mset, factory dispatch, invalid provider                                                   |
+| `storage.test.ts`   | `aws-sdk-client-mock` on `S3Client`: upload/download/delete/exists/list/listIter/metadata/copy/move/presigned/uploadStream; client/backend split & view ownership |
+| `messaging.test.ts` | `aws-sdk-client-mock` on `SQSClient`: send/sendBatch/receive/delete/purge/healthCheck, invalid provider                                                           |
+| `secrets.test.ts`   | `aws-sdk-client-mock` on `SecretsManagerClient`: CRUD, JSON, prefix list, create-on-404 fallback, error mapping                                                   |
+| `pubsub.test.ts`    | `aws-sdk-client-mock` on `SNSClient`: publish, attributes, batch >10 chunking, healthCheck                                                                        |
+| `document.test.ts`  | Recording/DI of `MongoClient` constructor (no real connections): URI building, pool defaults/overrides, password URL-encoding, Cosmos URI construction            |
 
 Azure adapters get unit tests with hand-rolled fakes of the SDK client surface (the
 Python suite also only mock-tests AWS; we match and slightly exceed that). No live-cloud
@@ -248,7 +255,7 @@ choice. Recorded here for awareness:
   intentional and asserted by `cache.test.ts`.
 - **Azure Key Vault `getSecret` null coercion (`azureKeyvault.ts`).** Python returns
   `secret.value` (may be `None`); TS returns `secret.value ?? ""`. Python does NOT error
-  on a null value, so hard-failing in TS would diverge *more*; the `?? ""` coercion is
+  on a null value, so hard-failing in TS would diverge _more_; the `?? ""` coercion is
   the type-safe analog for the `Promise<string>` contract. (Note: AWS Secrets Manager
   `getSecret` was changed to hard-fail when `SecretString` is undefined, because there
-  Python *does* hard-fail via `KeyError`.)
+  Python _does_ hard-fail via `KeyError`.)

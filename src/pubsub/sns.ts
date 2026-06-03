@@ -66,10 +66,9 @@ interface SNSConfig {
   profile?: string;
 }
 
-function buildConfig(opts: SNSClientOptions): Pick<
-  SNSConfig,
-  "endpointUrl" | "maxPoolConnections" | "connectTimeout" | "readTimeout"
-> {
+function buildConfig(
+  opts: SNSClientOptions,
+): Pick<SNSConfig, "endpointUrl" | "maxPoolConnections" | "connectTimeout" | "readTimeout"> {
   return {
     endpointUrl: opts.endpointUrl,
     maxPoolConnections: opts.maxPoolConnections ?? 25,
@@ -157,9 +156,10 @@ export class AWSSNSBackend extends PubSubBackend {
         sessionToken: this.config.credentials.sessionToken,
       };
     } else if (this.config.profile !== undefined) {
-      const credsMod = await loadOptional<
-        typeof import("@aws-sdk/credential-providers")
-      >("@aws-sdk/credential-providers", PROVIDER);
+      const credsMod = await loadOptional<typeof import("@aws-sdk/credential-providers")>(
+        "@aws-sdk/credential-providers",
+        PROVIDER,
+      );
       cfg.credentials = credsMod.fromIni({ profile: this.config.profile });
     }
     return new mod.SNSClient(cfg);
@@ -189,9 +189,9 @@ export class AWSSNSBackend extends PubSubBackend {
       input.MessageAttributes = toMessageAttributes(attributes);
     }
     try {
-      const response = (await client.send(
-        new mod.PublishCommand(input) as never,
-      )) as { MessageId?: string };
+      const response = (await client.send(new mod.PublishCommand(input) as never)) as {
+        MessageId?: string;
+      };
       return response.MessageId ?? "";
     } catch (err) {
       throw this.translate(err, topic);

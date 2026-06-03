@@ -54,6 +54,9 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:check": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
@@ -133,6 +136,7 @@
     "ioredis": "^5.4.2",
     "ioredis-mock": "^8.9.0",
     "mongodb": "^6.12.0",
+    "prettier": "^3.8.3",
     "tsup": "^8.3.5",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.60.1",

@@ -156,10 +156,9 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
       const client = new Redis(options);
       return new StandaloneRedisBackend(client);
     } catch (e) {
-      throw new CacheConnectionError(
-        `Failed to connect to Redis (mTLS): ${describe(e)}`,
-        { cause: e },
-      );
+      throw new CacheConnectionError(`Failed to connect to Redis (mTLS): ${describe(e)}`, {
+        cause: e,
+      });
     }
   }
 }

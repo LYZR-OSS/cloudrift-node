@@ -22,10 +22,7 @@ export async function loadOptional<T>(pkg: string, provider: string): Promise<T>
     return (await import(pkg)) as T;
   } catch (err) {
     if (isModuleNotFound(err, pkg)) {
-      throw new CloudRiftError(
-        `install ${pkg} to use the ${provider} provider`,
-        { cause: err },
-      );
+      throw new CloudRiftError(`install ${pkg} to use the ${provider} provider`, { cause: err });
     }
     throw err;
   }

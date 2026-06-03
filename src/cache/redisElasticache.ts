@@ -80,12 +80,11 @@ export interface IamTokenParams {
  * `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`, `X-Amz-SignedHeaders` and
  * `X-Amz-Signature` — the same shape boto3's `SigV4QueryAuth` emits.
  */
-export async function generateElastiCacheIamToken(
-  params: IamTokenParams,
-): Promise<string> {
-  const { SignatureV4 } = await loadOptional<
-    typeof import("@smithy/signature-v4")
-  >("@smithy/signature-v4", "elasticache");
+export async function generateElastiCacheIamToken(params: IamTokenParams): Promise<string> {
+  const { SignatureV4 } = await loadOptional<typeof import("@smithy/signature-v4")>(
+    "@smithy/signature-v4",
+    "elasticache",
+  );
   const { Sha256 } = await loadOptional<typeof import("@aws-crypto/sha256-js")>(
     "@aws-crypto/sha256-js",
     "elasticache",
@@ -149,9 +148,10 @@ async function resolveCredentials(opts: {
       ...(opts.awsSessionToken ? { sessionToken: opts.awsSessionToken } : {}),
     };
   }
-  const providers = await loadOptional<
-    typeof import("@aws-sdk/credential-providers")
-  >("@aws-sdk/credential-providers", "elasticache");
+  const providers = await loadOptional<typeof import("@aws-sdk/credential-providers")>(
+    "@aws-sdk/credential-providers",
+    "elasticache",
+  );
   if (opts.profileName) {
     return providers.fromIni({ profile: opts.profileName })();
   }
@@ -188,10 +188,9 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
       const client = new Redis(options);
       return new AWSElastiCacheBackend(client);
     } catch (e) {
-      throw new CacheConnectionError(
-        `Failed to connect to ElastiCache: ${describe(e)}`,
-        { cause: e },
-      );
+      throw new CacheConnectionError(`Failed to connect to ElastiCache: ${describe(e)}`, {
+        cause: e,
+      });
     }
   }
 
@@ -254,10 +253,9 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
       attachIamTokenRefresh(client, genToken);
       return new AWSElastiCacheBackend(client);
     } catch (e) {
-      throw new CacheConnectionError(
-        `Failed to connect to ElastiCache (IAM): ${describe(e)}`,
-        { cause: e },
-      );
+      throw new CacheConnectionError(`Failed to connect to ElastiCache (IAM): ${describe(e)}`, {
+        cause: e,
+      });
     }
   }
 
@@ -292,10 +290,9 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
       const client = new Redis(options);
       return new AWSElastiCacheBackend(client);
     } catch (e) {
-      throw new CacheConnectionError(
-        `Failed to connect to ElastiCache (mTLS): ${describe(e)}`,
-        { cause: e },
-      );
+      throw new CacheConnectionError(`Failed to connect to ElastiCache (mTLS): ${describe(e)}`, {
+        cause: e,
+      });
     }
   }
 }
@@ -316,10 +313,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
  * before scheduling a reconnect, so the refreshed password is in place by the
  * time the next connection is opened.
  */
-function attachIamTokenRefresh(
-  client: RedisDefault,
-  genToken: () => Promise<string>,
-): void {
+function attachIamTokenRefresh(client: RedisDefault, genToken: () => Promise<string>): void {
   client.on("close", () => {
     genToken()
       .then((token) => {

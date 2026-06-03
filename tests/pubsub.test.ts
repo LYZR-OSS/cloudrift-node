@@ -95,9 +95,9 @@ describe("AWSSNSBackend.publishBatch", () => {
       Failed: [{ Id: "0", Code: "InternalError", Message: "boom", SenderFault: false }],
     });
     const backend = await makeBackend();
-    await expect(
-      backend.publishBatch(TOPIC, [{ message: "m0" }]),
-    ).rejects.toBeInstanceOf(PublishError);
+    await expect(backend.publishBatch(TOPIC, [{ message: "m0" }])).rejects.toBeInstanceOf(
+      PublishError,
+    );
     await backend.close();
   });
 
@@ -151,11 +151,9 @@ describe("AWSSNSBackend.healthCheck", () => {
 
 describe("getPubsub factory", () => {
   it("throws CloudRiftError for an unknown provider", async () => {
-    await expect(
-      getPubsub("gcp_pubsub" as never, { project: "my-proj" }),
-    ).rejects.toBeInstanceOf(CloudRiftError);
-    await expect(
-      getPubsub("gcp_pubsub" as never, {}),
-    ).rejects.toThrow(/Unknown pubsub provider/);
+    await expect(getPubsub("gcp_pubsub" as never, { project: "my-proj" })).rejects.toBeInstanceOf(
+      CloudRiftError,
+    );
+    await expect(getPubsub("gcp_pubsub" as never, {})).rejects.toThrow(/Unknown pubsub provider/);
   });
 });

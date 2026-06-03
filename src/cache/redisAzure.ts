@@ -71,10 +71,9 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
       const client = new Redis(options);
       return new AzureRedisCacheBackend(client);
     } catch (e) {
-      throw new CacheConnectionError(
-        `Failed to connect to Azure Cache for Redis: ${describe(e)}`,
-        { cause: e },
-      );
+      throw new CacheConnectionError(`Failed to connect to Azure Cache for Redis: ${describe(e)}`, {
+        cause: e,
+      });
     }
   }
 
@@ -201,10 +200,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
  * `client.options.password`, so reconnects use a fresh (non-expired) token.
  * See the ElastiCache equivalent for the rationale and limitations.
  */
-function attachEntraTokenRefresh(
-  client: RedisDefault,
-  genToken: () => Promise<string>,
-): void {
+function attachEntraTokenRefresh(client: RedisDefault, genToken: () => Promise<string>): void {
   client.on("close", () => {
     genToken()
       .then((token) => {

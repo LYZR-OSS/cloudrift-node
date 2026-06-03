@@ -16,10 +16,7 @@ export { CacheBackend } from "./base.js";
 export type { CacheValue, CachePipeline } from "./base.js";
 export { BaseRedisBackend } from "./redisBase.js";
 export { StandaloneRedisBackend } from "./redisStandalone.js";
-export {
-  AWSElastiCacheBackend,
-  generateElastiCacheIamToken,
-} from "./redisElasticache.js";
+export { AWSElastiCacheBackend, generateElastiCacheIamToken } from "./redisElasticache.js";
 export type { IamTokenParams } from "./redisElasticache.js";
 export { AzureRedisCacheBackend } from "./redisAzure.js";
 
@@ -46,9 +43,7 @@ const AUTH_METHOD_TO_FACTORY: Record<string, string> = {
   from_service_principal: "fromServicePrincipal",
 };
 
-type CacheBackendFactory = (
-  options: Record<string, unknown>,
-) => Promise<CacheBackend>;
+type CacheBackendFactory = (options: Record<string, unknown>) => Promise<CacheBackend>;
 
 /**
  * Instantiate a cache backend.
@@ -86,9 +81,7 @@ export async function getCache(
     : undefined;
 
   if (typeof factory !== "function") {
-    throw new CloudRiftError(
-      `${backend.name} has no auth method ${JSON.stringify(authMethod)}.`,
-    );
+    throw new CloudRiftError(`${backend.name} has no auth method ${JSON.stringify(authMethod)}.`);
   }
 
   return (factory as CacheBackendFactory).call(backend, options);

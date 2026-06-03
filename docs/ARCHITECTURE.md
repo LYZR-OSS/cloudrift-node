@@ -104,6 +104,7 @@ getStorage(other)          → throws CloudRiftError("unknown provider ...")
 ```
 
 Same precedence pattern for:
+
 - `getQueue`: `sqs` (accessKey | profile | iamRole), `azure_service_bus`
   (connectionString | clientSecret→servicePrincipal | managedIdentity)
 - `getSecrets`: `aws_secrets_manager` (accessKey | profile | iamRole),
@@ -262,30 +263,40 @@ export abstract class StorageBackend {
   abstract delete(key: string): Promise<void>;
   abstract exists(key: string): Promise<boolean>;
   abstract list(prefix?: string): Promise<string[]>;
-  listIter(prefix?: string): AsyncIterable<string>;            // default: wraps list()
+  listIter(prefix?: string): AsyncIterable<string>; // default: wraps list()
   abstract presignedUrl(key: string, expiresIn?: number): Promise<string>; // default 3600
   abstract copy(srcKey: string, dstKey: string, dstBucket?: string): Promise<string>;
   move(srcKey: string, dstKey: string, dstBucket?: string): Promise<string>; // default copy+delete
   abstract getMetadata(key: string): Promise<ObjectMetadata>;
-  abstract uploadStream(key: string, stream: AsyncIterable<Buffer | Uint8Array>,
-                        contentType?: string): Promise<string>;
-  healthCheck(): Promise<boolean>;          // default: exists("__cloudrift_health__"), catch→false
-  close(): Promise<void>;                   // default no-op
-  [Symbol.asyncDispose](): Promise<void>;   // → close()
+  abstract uploadStream(
+    key: string,
+    stream: AsyncIterable<Buffer | Uint8Array>,
+    contentType?: string,
+  ): Promise<string>;
+  healthCheck(): Promise<boolean>; // default: exists("__cloudrift_health__"), catch→false
+  close(): Promise<void>; // default no-op
+  [Symbol.asyncDispose](): Promise<void>; // → close()
 }
 
 export interface AwsClientOptions {
   endpointUrl?: string;
-  maxPoolConnections?: number;   // S3 default 50 → maps to maxSockets/requestHandler cfg
-  connectTimeout?: number;       // seconds (S3 default 10)
-  readTimeout?: number;          // seconds (S3 default 60)
+  maxPoolConnections?: number; // S3 default 50 → maps to maxSockets/requestHandler cfg
+  connectTimeout?: number; // seconds (S3 default 10)
+  readTimeout?: number; // seconds (S3 default 60)
 }
 export interface AwsAccessKeyOptions extends AwsClientOptions {
-  awsAccessKeyId: string; awsSecretAccessKey: string;
-  awsSessionToken?: string; region?: string;          // default "us-east-1"
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsSessionToken?: string;
+  region?: string; // default "us-east-1"
 }
-export interface AwsIamRoleOptions extends AwsClientOptions { region?: string; }
-export interface AwsProfileOptions extends AwsClientOptions { profileName: string; region?: string; }
+export interface AwsIamRoleOptions extends AwsClientOptions {
+  region?: string;
+}
+export interface AwsProfileOptions extends AwsClientOptions {
+  profileName: string;
+  region?: string;
+}
 
 export class AWSS3Client {
   static fromAccessKey(opts: AwsAccessKeyOptions): AWSS3Client;
@@ -307,8 +318,12 @@ export class AzureBlobClient {
   static fromAccountKey(opts: { accountUrl: string; accountKey: string }): AzureBlobClient;
   static fromSasToken(opts: { accountUrl: string; sasToken: string }): AzureBlobClient;
   static fromManagedIdentity(opts: { accountUrl: string; clientId?: string }): AzureBlobClient;
-  static fromServicePrincipal(opts: { accountUrl: string; tenantId: string;
-                                      clientId: string; clientSecret: string }): AzureBlobClient;
+  static fromServicePrincipal(opts: {
+    accountUrl: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  }): AzureBlobClient;
   container(name: string): AzureBlobBackend;
   close(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
@@ -319,10 +334,14 @@ export class AzureBlobBackend extends StorageBackend {
 }
 
 export type StorageProvider = "s3" | "azure_blob";
-export function getStorage(provider: StorageProvider,
-                           options: Record<string, unknown>): Promise<StorageBackend>;
-export function getStorageClient(provider: StorageProvider,
-                                 options: Record<string, unknown>): Promise<AWSS3Client | AzureBlobClient>;
+export function getStorage(
+  provider: StorageProvider,
+  options: Record<string, unknown>,
+): Promise<StorageBackend>;
+export function getStorageClient(
+  provider: StorageProvider,
+  options: Record<string, unknown>,
+): Promise<AWSS3Client | AzureBlobClient>;
 ```
 
 Factories are `async` (lazy SDK import). Static `from*` constructors that need an SDK
@@ -345,8 +364,8 @@ export abstract class MessagingBackend {
   abstract receive(maxMessages?: number, waitTime?: number): Promise<Message[]>; // 1, 0
   abstract delete(receiptHandle: string): Promise<void>;
   abstract purge(): Promise<void>;
-  healthCheck(): Promise<boolean>;   // default true
-  close(): Promise<void>;            // default no-op
+  healthCheck(): Promise<boolean>; // default true
+  close(): Promise<void>; // default no-op
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -356,17 +375,29 @@ export class AWSSQSBackend extends MessagingBackend {
   static fromProfile(opts: AwsProfileOptions & { queueUrl: string }): AWSSQSBackend;
 }
 export class AzureServiceBusBackend extends MessagingBackend {
-  static fromConnectionString(opts: { connectionString: string; queueName: string }): AzureServiceBusBackend;
-  static fromManagedIdentity(opts: { fullyQualifiedNamespace: string; queueName: string;
-                                     clientId?: string }): AzureServiceBusBackend;
-  static fromServicePrincipal(opts: { fullyQualifiedNamespace: string; queueName: string;
-                                      tenantId: string; clientId: string;
-                                      clientSecret: string }): AzureServiceBusBackend;
+  static fromConnectionString(opts: {
+    connectionString: string;
+    queueName: string;
+  }): AzureServiceBusBackend;
+  static fromManagedIdentity(opts: {
+    fullyQualifiedNamespace: string;
+    queueName: string;
+    clientId?: string;
+  }): AzureServiceBusBackend;
+  static fromServicePrincipal(opts: {
+    fullyQualifiedNamespace: string;
+    queueName: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  }): AzureServiceBusBackend;
 }
 
 export type QueueProvider = "sqs" | "azure_service_bus";
-export function getQueue(provider: QueueProvider,
-                         options: Record<string, unknown>): Promise<MessagingBackend>;
+export function getQueue(
+  provider: QueueProvider,
+  options: Record<string, unknown>,
+): Promise<MessagingBackend>;
 ```
 
 ### 4.4 document
@@ -374,24 +405,49 @@ export function getQueue(provider: QueueProvider,
 ```ts
 import type { MongoClient } from "mongodb";
 
-export interface PoolOptions { maxPoolSize?: number; minPoolSize?: number; } // 100, 0
+export interface PoolOptions {
+  maxPoolSize?: number;
+  minPoolSize?: number;
+} // 100, 0
 
 // documentdb.ts
-export function connectUri(opts: { uri: string; tlsCaFile?: string } & PoolOptions
-                           & Record<string, unknown>): Promise<MongoClient>;
-export function connectCredentials(opts: { host: string; port: number; username: string;
-  password: string; tls?: boolean; tlsCaFile?: string } & PoolOptions): Promise<MongoClient>;
-export function connectTlsCert(opts: { host: string; port: number; username: string;
-  password: string; tlsCertKeyFile: string; tlsCaFile?: string } & PoolOptions): Promise<MongoClient>;
+export function connectUri(
+  opts: { uri: string; tlsCaFile?: string } & PoolOptions & Record<string, unknown>,
+): Promise<MongoClient>;
+export function connectCredentials(
+  opts: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    tls?: boolean;
+    tlsCaFile?: string;
+  } & PoolOptions,
+): Promise<MongoClient>;
+export function connectTlsCert(
+  opts: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    tlsCertKeyFile: string;
+    tlsCaFile?: string;
+  } & PoolOptions,
+): Promise<MongoClient>;
 
 // cosmos.ts
-export function connectConnectionString(opts: { connectionString: string } & PoolOptions): Promise<MongoClient>;
-export function connectAccountKey(opts: { account: string; accountKey: string; port?: number;
-  appName?: string } & PoolOptions): Promise<MongoClient>;  // port default 10255
+export function connectConnectionString(
+  opts: { connectionString: string } & PoolOptions,
+): Promise<MongoClient>;
+export function connectAccountKey(
+  opts: { account: string; accountKey: string; port?: number; appName?: string } & PoolOptions,
+): Promise<MongoClient>; // port default 10255
 
 export type DocumentProvider = "documentdb" | "cosmos";
-export function getMongodb(provider: DocumentProvider,
-                           options: Record<string, unknown>): Promise<MongoClient>;
+export function getMongodb(
+  provider: DocumentProvider,
+  options: Record<string, unknown>,
+): Promise<MongoClient>;
 ```
 
 Cosmos `connectAccountKey` URI: `mongodb://{account}:{key}@{account}.mongo.cosmos.azure.com:{port}/?ssl=true&replicaSet=globaldb&retryWrites=false&maxIdleTimeMS=120000&appName=@{account}@`.
@@ -405,12 +461,12 @@ export type CacheValue = Buffer | string;
 export abstract class CacheBackend {
   abstract get(key: string): Promise<Buffer | null>;
   abstract set(key: string, value: CacheValue, ttl?: number): Promise<void>;
-  setex(key: string, value: CacheValue, ttl: number): Promise<void>;  // default → set
+  setex(key: string, value: CacheValue, ttl: number): Promise<void>; // default → set
   abstract delete(...keys: string[]): Promise<number>;
   abstract exists(key: string): Promise<boolean>;
   abstract expire(key: string, seconds: number): Promise<boolean>;
-  abstract ttl(key: string): Promise<number>;                          // -1 / -2 semantics
-  abstract keys(pattern?: string): Promise<string[]>;                  // default "*"
+  abstract ttl(key: string): Promise<number>; // -1 / -2 semantics
+  abstract keys(pattern?: string): Promise<string[]>; // default "*"
   abstract hget(key: string, field: string): Promise<Buffer | null>;
   abstract hset(key: string, field: string, value: CacheValue): Promise<number>;
   abstract hgetall(key: string): Promise<Record<string, Buffer>>;
@@ -426,8 +482,8 @@ export abstract class CacheBackend {
   abstract ping(): Promise<boolean>;
   abstract flush(): Promise<void>;
   abstract close(): Promise<void>;
-  healthCheck(): Promise<boolean>;          // default: ping(), catch → false
-  abstract pipeline(): CachePipeline;       // ioredis ChainableCommander wrapper
+  healthCheck(): Promise<boolean>; // default: ping(), catch → false
+  abstract pipeline(): CachePipeline; // ioredis ChainableCommander wrapper
   [Symbol.asyncDispose](): Promise<void>;
 }
 export interface CachePipeline {
@@ -440,36 +496,101 @@ export interface CachePipeline {
 
 export class StandaloneRedisBackend /* extends BaseRedisBackend extends CacheBackend */ {
   static fromUrl(opts: { url: string; sslCaCerts?: string }): Promise<StandaloneRedisBackend>;
-  static fromCredentials(opts: { host: string; port?: number; password?: string; username?: string;
-    db?: number; ssl?: boolean; sslCaCerts?: string }): Promise<StandaloneRedisBackend>;     // port 6379
-  static fromTlsCert(opts: { host: string; port?: number; password?: string; username?: string;
-    db?: number; sslCertfile: string; sslKeyfile: string; sslCaCerts?: string }): Promise<StandaloneRedisBackend>; // port 6380
+  static fromCredentials(opts: {
+    host: string;
+    port?: number;
+    password?: string;
+    username?: string;
+    db?: number;
+    ssl?: boolean;
+    sslCaCerts?: string;
+  }): Promise<StandaloneRedisBackend>; // port 6379
+  static fromTlsCert(opts: {
+    host: string;
+    port?: number;
+    password?: string;
+    username?: string;
+    db?: number;
+    sslCertfile: string;
+    sslKeyfile: string;
+    sslCaCerts?: string;
+  }): Promise<StandaloneRedisBackend>; // port 6380
 }
 export class AWSElastiCacheBackend {
-  static fromAuthToken(opts: { host: string; port?: number; authToken?: string; db?: number;
-    ssl?: boolean; sslCaCerts?: string }): Promise<AWSElastiCacheBackend>;                   // port 6379, ssl true
-  static fromIamAuth(opts: { host: string; username: string; region: string; port?: number;
-    db?: number; ssl?: boolean; sslCaCerts?: string; awsAccessKeyId?: string;
-    awsSecretAccessKey?: string; awsSessionToken?: string; profileName?: string }): Promise<AWSElastiCacheBackend>;
-  static fromTlsCert(opts: { host: string; port?: number; authToken?: string; db?: number;
-    sslCertfile: string; sslKeyfile: string; sslCaCerts?: string }): Promise<AWSElastiCacheBackend>;
+  static fromAuthToken(opts: {
+    host: string;
+    port?: number;
+    authToken?: string;
+    db?: number;
+    ssl?: boolean;
+    sslCaCerts?: string;
+  }): Promise<AWSElastiCacheBackend>; // port 6379, ssl true
+  static fromIamAuth(opts: {
+    host: string;
+    username: string;
+    region: string;
+    port?: number;
+    db?: number;
+    ssl?: boolean;
+    sslCaCerts?: string;
+    awsAccessKeyId?: string;
+    awsSecretAccessKey?: string;
+    awsSessionToken?: string;
+    profileName?: string;
+  }): Promise<AWSElastiCacheBackend>;
+  static fromTlsCert(opts: {
+    host: string;
+    port?: number;
+    authToken?: string;
+    db?: number;
+    sslCertfile: string;
+    sslKeyfile: string;
+    sslCaCerts?: string;
+  }): Promise<AWSElastiCacheBackend>;
 }
 export class AzureRedisCacheBackend {
-  static fromAccessKey(opts: { host: string; accessKey: string; port?: number; db?: number;
-    ssl?: boolean }): Promise<AzureRedisCacheBackend>;                                       // port 6380, ssl true
-  static fromManagedIdentity(opts: { host: string; username: string; port?: number; db?: number;
-    ssl?: boolean; clientId?: string }): Promise<AzureRedisCacheBackend>;
-  static fromServicePrincipal(opts: { host: string; username: string; tenantId: string;
-    clientId: string; clientSecret: string; port?: number; db?: number; ssl?: boolean }): Promise<AzureRedisCacheBackend>;
+  static fromAccessKey(opts: {
+    host: string;
+    accessKey: string;
+    port?: number;
+    db?: number;
+    ssl?: boolean;
+  }): Promise<AzureRedisCacheBackend>; // port 6380, ssl true
+  static fromManagedIdentity(opts: {
+    host: string;
+    username: string;
+    port?: number;
+    db?: number;
+    ssl?: boolean;
+    clientId?: string;
+  }): Promise<AzureRedisCacheBackend>;
+  static fromServicePrincipal(opts: {
+    host: string;
+    username: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+    port?: number;
+    db?: number;
+    ssl?: boolean;
+  }): Promise<AzureRedisCacheBackend>;
 }
 
 export type CacheProvider = "redis" | "elasticache" | "azure_redis";
 export type CacheAuthMethod =
-  | "from_url" | "from_credentials" | "from_tls_cert"
-  | "from_auth_token" | "from_iam_auth"
-  | "from_access_key" | "from_managed_identity" | "from_service_principal";
-export function getCache(provider: CacheProvider, authMethod: CacheAuthMethod,
-                         options: Record<string, unknown>): Promise<CacheBackend>;
+  | "from_url"
+  | "from_credentials"
+  | "from_tls_cert"
+  | "from_auth_token"
+  | "from_iam_auth"
+  | "from_access_key"
+  | "from_managed_identity"
+  | "from_service_principal";
+export function getCache(
+  provider: CacheProvider,
+  authMethod: CacheAuthMethod,
+  options: Record<string, unknown>,
+): Promise<CacheBackend>;
 ```
 
 ### 4.6 secrets
@@ -481,25 +602,31 @@ export abstract class SecretBackend {
   abstract setSecret(name: string, value: string): Promise<void>;
   abstract deleteSecret(name: string): Promise<void>;
   abstract listSecrets(prefix?: string): Promise<string[]>;
-  healthCheck(): Promise<boolean>;  // default: listSecrets("__cloudrift_health__"), catch → false
-  close(): Promise<void>;           // default no-op
+  healthCheck(): Promise<boolean>; // default: listSecrets("__cloudrift_health__"), catch → false
+  close(): Promise<void>; // default no-op
   [Symbol.asyncDispose](): Promise<void>;
 }
 
 export class AWSSecretsManagerBackend extends SecretBackend {
-  static fromAccessKey(opts: AwsAccessKeyOptions): AWSSecretsManagerBackend;  // pool default 25, read 30s
+  static fromAccessKey(opts: AwsAccessKeyOptions): AWSSecretsManagerBackend; // pool default 25, read 30s
   static fromIamRole(opts?: AwsIamRoleOptions): AWSSecretsManagerBackend;
   static fromProfile(opts: AwsProfileOptions): AWSSecretsManagerBackend;
 }
 export class AzureKeyVaultBackend extends SecretBackend {
   static fromManagedIdentity(opts: { vaultUrl: string; clientId?: string }): AzureKeyVaultBackend;
-  static fromServicePrincipal(opts: { vaultUrl: string; tenantId: string; clientId: string;
-                                      clientSecret: string }): AzureKeyVaultBackend;
+  static fromServicePrincipal(opts: {
+    vaultUrl: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  }): AzureKeyVaultBackend;
 }
 
 export type SecretsProvider = "aws_secrets_manager" | "azure_keyvault";
-export function getSecrets(provider: SecretsProvider,
-                           options: Record<string, unknown>): Promise<SecretBackend>;
+export function getSecrets(
+  provider: SecretsProvider,
+  options: Record<string, unknown>,
+): Promise<SecretBackend>;
 ```
 
 ### 4.7 pubsub
@@ -511,11 +638,14 @@ export interface PubSubMessage {
 }
 
 export abstract class PubSubBackend {
-  abstract publish(topic: string, message: string,
-                   attributes?: Record<string, string>): Promise<string>;
+  abstract publish(
+    topic: string,
+    message: string,
+    attributes?: Record<string, string>,
+  ): Promise<string>;
   abstract publishBatch(topic: string, messages: PubSubMessage[]): Promise<string[]>;
-  healthCheck(): Promise<boolean>;  // default true
-  close(): Promise<void>;           // default no-op
+  healthCheck(): Promise<boolean>; // default true
+  close(): Promise<void>; // default no-op
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -528,13 +658,19 @@ export class AWSSNSBackend extends PubSubBackend {
 export class AzureEventGridBackend extends PubSubBackend {
   static fromAccessKey(opts: { endpoint: string; accessKey: string }): AzureEventGridBackend;
   static fromManagedIdentity(opts: { endpoint: string; clientId?: string }): AzureEventGridBackend;
-  static fromServicePrincipal(opts: { endpoint: string; tenantId: string; clientId: string;
-                                      clientSecret: string }): AzureEventGridBackend;
+  static fromServicePrincipal(opts: {
+    endpoint: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  }): AzureEventGridBackend;
 }
 
 export type PubSubProvider = "sns" | "azure_eventgrid";
-export function getPubsub(provider: PubSubProvider,
-                          options: Record<string, unknown>): Promise<PubSubBackend>;
+export function getPubsub(
+  provider: PubSubProvider,
+  options: Record<string, unknown>,
+): Promise<PubSubBackend>;
 ```
 
 ### 4.8 Root exports (`src/index.ts`)
@@ -546,23 +682,23 @@ classes, all error classes, all public types (`Message`, `ObjectMetadata`,
 
 ## 5. Error-mapping reference table
 
-| Provider error | cloudrift error |
-|---|---|
-| S3 404 / `NoSuchKey` / `NotFound` | `ObjectNotFoundError` |
-| S3 403 / `AccessDenied` | `StoragePermissionError` |
-| Azure Blob `RestError` 404 / `BlobNotFound` | `ObjectNotFoundError` |
-| Azure Blob `RestError` 403 | `StoragePermissionError` |
-| SQS `AWS.SimpleQueueService.NonExistentQueue` / `QueueDoesNotExist` | `QueueNotFoundError` |
-| SQS send failure / batch `Failed` entries | `MessageSendError` |
-| Service Bus `MessagingEntityNotFound` | `QueueNotFoundError` |
-| Secrets Manager `ResourceNotFoundException` (get/delete) | `SecretNotFoundError` |
-| Secrets Manager `AccessDeniedException` | `SecretPermissionError` |
-| Key Vault 404 | `SecretNotFoundError`; 403 → `SecretPermissionError` |
-| SNS `NotFound` / `NotFoundException` | `TopicNotFoundError` |
-| SNS batch `Failed` entries | `PublishError` |
-| Event Grid 404 | `TopicNotFoundError`; 403 → `PubSubError`; else `PublishError` |
-| ioredis connect failure | `CacheConnectionError`; op failure → `CacheError` |
-| Mongo URI/construction failure | `DocumentConnectionError` |
-| anything unmapped in domain X | domain base error (`StorageError`, …) |
+| Provider error                                                      | cloudrift error                                                |
+| ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| S3 404 / `NoSuchKey` / `NotFound`                                   | `ObjectNotFoundError`                                          |
+| S3 403 / `AccessDenied`                                             | `StoragePermissionError`                                       |
+| Azure Blob `RestError` 404 / `BlobNotFound`                         | `ObjectNotFoundError`                                          |
+| Azure Blob `RestError` 403                                          | `StoragePermissionError`                                       |
+| SQS `AWS.SimpleQueueService.NonExistentQueue` / `QueueDoesNotExist` | `QueueNotFoundError`                                           |
+| SQS send failure / batch `Failed` entries                           | `MessageSendError`                                             |
+| Service Bus `MessagingEntityNotFound`                               | `QueueNotFoundError`                                           |
+| Secrets Manager `ResourceNotFoundException` (get/delete)            | `SecretNotFoundError`                                          |
+| Secrets Manager `AccessDeniedException`                             | `SecretPermissionError`                                        |
+| Key Vault 404                                                       | `SecretNotFoundError`; 403 → `SecretPermissionError`           |
+| SNS `NotFound` / `NotFoundException`                                | `TopicNotFoundError`                                           |
+| SNS batch `Failed` entries                                          | `PublishError`                                                 |
+| Event Grid 404                                                      | `TopicNotFoundError`; 403 → `PubSubError`; else `PublishError` |
+| ioredis connect failure                                             | `CacheConnectionError`; op failure → `CacheError`              |
+| Mongo URI/construction failure                                      | `DocumentConnectionError`                                      |
+| anything unmapped in domain X                                       | domain base error (`StorageError`, …)                          |
 
 Always pass the original error as `cause`.

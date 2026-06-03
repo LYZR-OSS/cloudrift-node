@@ -3,11 +3,7 @@ import type {
   SecretsManagerClientConfig,
 } from "@aws-sdk/client-secrets-manager";
 
-import {
-  SecretError,
-  SecretNotFoundError,
-  SecretPermissionError,
-} from "../core/errors.js";
+import { SecretError, SecretNotFoundError, SecretPermissionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 import { SecretBackend } from "./base.js";
 
@@ -131,9 +127,10 @@ export class AWSSecretsManagerBackend extends SecretBackend {
       config.endpoint = this.#config.endpointUrl;
     }
     if (this.#config.profileName !== undefined) {
-      const credsMod = await loadOptional<
-        typeof import("@aws-sdk/credential-providers")
-      >("@aws-sdk/credential-providers", PROVIDER);
+      const credsMod = await loadOptional<typeof import("@aws-sdk/credential-providers")>(
+        "@aws-sdk/credential-providers",
+        PROVIDER,
+      );
       config.credentials = credsMod.fromIni({ profile: this.#config.profileName });
     }
     config.requestHandler = {
@@ -170,9 +167,7 @@ export class AWSSecretsManagerBackend extends SecretBackend {
     const client = await this.#ensure();
     const sdk = this.#requireSdk();
     try {
-      const response = await client.send(
-        new sdk.GetSecretValueCommand({ SecretId: name }),
-      );
+      const response = await client.send(new sdk.GetSecretValueCommand({ SecretId: name }));
       // Python returns response["SecretString"], which raises KeyError when the
       // field is absent (e.g. a binary-only secret). Hard-fail to match instead
       // of silently coercing to "".
@@ -189,16 +184,12 @@ export class AWSSecretsManagerBackend extends SecretBackend {
     const client = await this.#ensure();
     const sdk = this.#requireSdk();
     try {
-      await client.send(
-        new sdk.PutSecretValueCommand({ SecretId: name, SecretString: value }),
-      );
+      await client.send(new sdk.PutSecretValueCommand({ SecretId: name, SecretString: value }));
     } catch (err) {
       if (errorName(err) === "ResourceNotFoundException") {
         // Python only wraps the put_secret_value ClientError; a failure of the
         // create_secret fallback propagates as the raw SDK error (unmapped).
-        await client.send(
-          new sdk.CreateSecretCommand({ Name: name, SecretString: value }),
-        );
+        await client.send(new sdk.CreateSecretCommand({ Name: name, SecretString: value }));
         return;
       }
       throw mapError(err, name);
@@ -225,9 +216,7 @@ export class AWSSecretsManagerBackend extends SecretBackend {
     const sdk = this.#requireSdk();
     try {
       const names: string[] = [];
-      const input = prefix
-        ? { Filters: [{ Key: "name" as const, Values: [prefix] }] }
-        : {};
+      const input = prefix ? { Filters: [{ Key: "name" as const, Values: [prefix] }] } : {};
       for await (const page of sdk.paginateListSecrets({ client }, input)) {
         for (const secret of page.SecretList ?? []) {
           if (secret.Name) {

@@ -1,11 +1,7 @@
 import type { TokenCredential } from "@azure/core-auth";
 import type { SecretClient } from "@azure/keyvault-secrets";
 
-import {
-  SecretError,
-  SecretNotFoundError,
-  SecretPermissionError,
-} from "../core/errors.js";
+import { SecretError, SecretNotFoundError, SecretPermissionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 import { SecretBackend } from "./base.js";
 
@@ -50,10 +46,7 @@ export class AzureKeyVaultBackend extends SecretBackend {
     this.#config = config;
   }
 
-  static fromManagedIdentity(opts: {
-    vaultUrl: string;
-    clientId?: string;
-  }): AzureKeyVaultBackend {
+  static fromManagedIdentity(opts: { vaultUrl: string; clientId?: string }): AzureKeyVaultBackend {
     return new AzureKeyVaultBackend({
       vaultUrl: opts.vaultUrl,
       credentialFactory: (identity) =>
@@ -72,11 +65,7 @@ export class AzureKeyVaultBackend extends SecretBackend {
     return new AzureKeyVaultBackend({
       vaultUrl: opts.vaultUrl,
       credentialFactory: (identity) =>
-        new identity.ClientSecretCredential(
-          opts.tenantId,
-          opts.clientId,
-          opts.clientSecret,
-        ),
+        new identity.ClientSecretCredential(opts.tenantId, opts.clientId, opts.clientSecret),
     });
   }
 
@@ -95,14 +84,8 @@ export class AzureKeyVaultBackend extends SecretBackend {
   }
 
   async #createClient(): Promise<SecretClient> {
-    const keyvault = await loadOptional<KeyVaultSdk>(
-      KEYVAULT_PACKAGE,
-      PROVIDER,
-    );
-    const identity = await loadOptional<IdentitySdk>(
-      IDENTITY_PACKAGE,
-      PROVIDER,
-    );
+    const keyvault = await loadOptional<KeyVaultSdk>(KEYVAULT_PACKAGE, PROVIDER);
+    const identity = await loadOptional<IdentitySdk>(IDENTITY_PACKAGE, PROVIDER);
     const credential = this.#config.credentialFactory(identity);
     this.#credential = credential;
     const client = new keyvault.SecretClient(this.#config.vaultUrl, credential);
@@ -184,9 +167,7 @@ function statusCode(err: unknown): number | undefined {
 function mapError(err: unknown, name: string): Error {
   const code = statusCode(err);
   const named =
-    typeof err === "object" && err !== null
-      ? (err as { name?: unknown }).name
-      : undefined;
+    typeof err === "object" && err !== null ? (err as { name?: unknown }).name : undefined;
   if (code === 404 || named === "ResourceNotFoundError") {
     return new SecretNotFoundError(`Secret not found: ${name}`, { cause: err });
   }

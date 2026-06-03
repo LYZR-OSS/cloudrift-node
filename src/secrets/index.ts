@@ -35,18 +35,12 @@ export async function getSecrets(
 ): Promise<SecretBackend> {
   if (provider === "aws_secrets_manager") {
     if ("awsAccessKeyId" in options) {
-      return AWSSecretsManagerBackend.fromAccessKey(
-        options as unknown as AwsAccessKeyOptions,
-      );
+      return AWSSecretsManagerBackend.fromAccessKey(options as unknown as AwsAccessKeyOptions);
     }
     if ("profileName" in options) {
-      return AWSSecretsManagerBackend.fromProfile(
-        options as unknown as AwsProfileOptions,
-      );
+      return AWSSecretsManagerBackend.fromProfile(options as unknown as AwsProfileOptions);
     }
-    return AWSSecretsManagerBackend.fromIamRole(
-      options as unknown as AwsIamRoleOptions,
-    );
+    return AWSSecretsManagerBackend.fromIamRole(options as unknown as AwsIamRoleOptions);
   }
 
   if (provider === "azure_keyvault") {

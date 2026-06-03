@@ -41,13 +41,9 @@ export function getQueue(
       );
     }
     if ("profileName" in options) {
-      return Promise.resolve(
-        AWSSQSBackend.fromProfile(options as unknown as SqsProfileOptions),
-      );
+      return Promise.resolve(AWSSQSBackend.fromProfile(options as unknown as SqsProfileOptions));
     }
-    return Promise.resolve(
-      AWSSQSBackend.fromIamRole(options as unknown as SqsIamRoleOptions),
-    );
+    return Promise.resolve(AWSSQSBackend.fromIamRole(options as unknown as SqsIamRoleOptions));
   }
 
   if (provider === "azure_service_bus") {

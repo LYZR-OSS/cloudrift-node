@@ -238,17 +238,13 @@ describe("AWSS3Backend", () => {
   it("maps 403 to StoragePermissionError", async () => {
     s3Mock.on(GetObjectCommand).rejects(awsError("AccessDenied", 403));
     const backend = await makeBackend();
-    await expect(backend.download("denied.txt")).rejects.toBeInstanceOf(
-      StoragePermissionError,
-    );
+    await expect(backend.download("denied.txt")).rejects.toBeInstanceOf(StoragePermissionError);
   });
 
   it("maps other errors to StorageError", async () => {
     s3Mock.on(PutObjectCommand).rejects(awsError("InternalError", 500));
     const backend = await makeBackend();
-    await expect(backend.upload("k.txt", Buffer.from("x"))).rejects.toBeInstanceOf(
-      StorageError,
-    );
+    await expect(backend.upload("k.txt", Buffer.from("x"))).rejects.toBeInstanceOf(StorageError);
   });
 
   it("attaches the original error as cause", async () => {
@@ -359,18 +355,16 @@ describe("getStorage dispatch", () => {
   });
 
   it("throws CloudRiftError for unknown provider", async () => {
-    await expect(
-      getStorage("gcs" as never, { bucket: "x" }),
-    ).rejects.toBeInstanceOf(CloudRiftError);
+    await expect(getStorage("gcs" as never, { bucket: "x" })).rejects.toBeInstanceOf(
+      CloudRiftError,
+    );
     await expect(getStorage("gcs" as never, { bucket: "x" })).rejects.toThrow(
       /Unknown storage provider/,
     );
   });
 
   it("getStorageClient throws CloudRiftError for unknown provider", async () => {
-    await expect(getStorageClient("gcs" as never, {})).rejects.toBeInstanceOf(
-      CloudRiftError,
-    );
+    await expect(getStorageClient("gcs" as never, {})).rejects.toBeInstanceOf(CloudRiftError);
   });
 });
 
@@ -501,19 +495,12 @@ function makeAzureBackend(
       ) {}
     },
     BlobSASPermissions: { parse: (p: string) => ({ perm: p }) },
-    generateBlobSASQueryParameters: (
-      values: { expiresOn: Date },
-      _cred: unknown,
-    ) => ({
+    generateBlobSASQueryParameters: (values: { expiresOn: Date }, _cred: unknown) => ({
       toString: () => `sig=fake&se=${values.expiresOn.toISOString()}`,
     }),
   } as unknown as ConstructorParameters<typeof AzureBlobClient>[0];
 
-  const client = new AzureBlobClient(
-    mod,
-    service as never,
-    opts.accountKey,
-  );
+  const client = new AzureBlobClient(mod, service as never, opts.accountKey);
   return new AzureBlobBackend("my-container", client, true);
 }
 
@@ -618,9 +605,7 @@ describe("AzureBlobBackend (fake)", () => {
   it("maps 404 to ObjectNotFoundError", async () => {
     const { service } = makeFakeService();
     const backend = makeAzureBackend(service);
-    await expect(backend.download("nope.txt")).rejects.toBeInstanceOf(
-      ObjectNotFoundError,
-    );
+    await expect(backend.download("nope.txt")).rejects.toBeInstanceOf(ObjectNotFoundError);
   });
 
   it("maps 403 to StoragePermissionError", async () => {
@@ -628,9 +613,7 @@ describe("AzureBlobBackend (fake)", () => {
     failures.op = "download";
     failures.error = new FakeRestError(403);
     const backend = makeAzureBackend(service);
-    await expect(backend.download("k.txt")).rejects.toBeInstanceOf(
-      StoragePermissionError,
-    );
+    await expect(backend.download("k.txt")).rejects.toBeInstanceOf(StoragePermissionError);
   });
 
   it("maps other errors to StorageError", async () => {
@@ -638,8 +621,6 @@ describe("AzureBlobBackend (fake)", () => {
     failures.op = "upload";
     failures.error = new FakeRestError(500);
     const backend = makeAzureBackend(service);
-    await expect(backend.upload("k.txt", Buffer.from("x"))).rejects.toBeInstanceOf(
-      StorageError,
-    );
+    await expect(backend.upload("k.txt", Buffer.from("x"))).rejects.toBeInstanceOf(StorageError);
   });
 });

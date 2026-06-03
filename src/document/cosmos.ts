@@ -15,11 +15,7 @@ import type { MongoClient, MongoClientOptions } from "mongodb";
 
 import { CloudRiftError, DocumentConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
-import {
-  quotePlus,
-  type MongoClientConstructor,
-  type PoolOptions,
-} from "./documentdb.js";
+import { quotePlus, type MongoClientConstructor, type PoolOptions } from "./documentdb.js";
 
 const DEFAULT_MAX_POOL_SIZE = 100;
 const DEFAULT_MIN_POOL_SIZE = 0;
@@ -32,9 +28,7 @@ const DEFAULT_PORT = 10255;
 let clientCtorOverride: MongoClientConstructor | undefined;
 
 /** Override the `MongoClient` constructor used by this module (testing only). */
-export function setMongoClientConstructor(
-  ctor: MongoClientConstructor | undefined,
-): void {
+export function setMongoClientConstructor(ctor: MongoClientConstructor | undefined): void {
   clientCtorOverride = ctor;
 }
 
@@ -42,10 +36,7 @@ async function resolveCtor(): Promise<MongoClientConstructor> {
   if (clientCtorOverride) {
     return clientCtorOverride;
   }
-  const mod = await loadOptional<{ MongoClient: MongoClientConstructor }>(
-    "mongodb",
-    "cosmos",
-  );
+  const mod = await loadOptional<{ MongoClient: MongoClientConstructor }>("mongodb", "cosmos");
   return mod.MongoClient;
 }
 
@@ -56,10 +47,7 @@ function poolOptions(opts: PoolOptions): MongoClientOptions {
   };
 }
 
-async function construct(
-  uri: string,
-  options: MongoClientOptions,
-): Promise<MongoClient> {
+async function construct(uri: string, options: MongoClientOptions): Promise<MongoClient> {
   // Resolve the constructor outside the try so a missing-package CloudRiftError
   // (the actionable "install mongodb ..." hint) propagates unchanged.
   const Ctor = await resolveCtor();
@@ -69,10 +57,9 @@ async function construct(
     if (err instanceof CloudRiftError) {
       throw err;
     }
-    throw new DocumentConnectionError(
-      `Failed to connect to Cosmos DB: ${String(err)}`,
-      { cause: err },
-    );
+    throw new DocumentConnectionError(`Failed to connect to Cosmos DB: ${String(err)}`, {
+      cause: err,
+    });
   }
 }
 

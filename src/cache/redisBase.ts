@@ -19,11 +19,7 @@
 import type { Redis, ChainableCommander } from "ioredis";
 
 import { CacheError } from "../core/errors.js";
-import {
-  CacheBackend,
-  type CachePipeline,
-  type CacheValue,
-} from "./base.js";
+import { CacheBackend, type CachePipeline, type CacheValue } from "./base.js";
 
 /**
  * Wrap an unknown thrown value as a `CacheError`, preserving the original via

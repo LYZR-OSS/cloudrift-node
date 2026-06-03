@@ -13,10 +13,7 @@ import { CloudRiftError, DocumentConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 
 /** Constructor signature for the native `mongodb` `MongoClient`. */
-export type MongoClientConstructor = new (
-  uri: string,
-  options?: MongoClientOptions,
-) => MongoClient;
+export type MongoClientConstructor = new (uri: string, options?: MongoClientOptions) => MongoClient;
 
 /** Connection-pool sizing options shared by every connect helper. */
 export interface PoolOptions {
@@ -55,9 +52,7 @@ export function quotePlus(value: string): string {
 let clientCtorOverride: MongoClientConstructor | undefined;
 
 /** Override the `MongoClient` constructor used by this module (testing only). */
-export function setMongoClientConstructor(
-  ctor: MongoClientConstructor | undefined,
-): void {
+export function setMongoClientConstructor(ctor: MongoClientConstructor | undefined): void {
   clientCtorOverride = ctor;
 }
 
@@ -65,10 +60,7 @@ async function resolveCtor(): Promise<MongoClientConstructor> {
   if (clientCtorOverride) {
     return clientCtorOverride;
   }
-  const mod = await loadOptional<{ MongoClient: MongoClientConstructor }>(
-    "mongodb",
-    "documentdb",
-  );
+  const mod = await loadOptional<{ MongoClient: MongoClientConstructor }>("mongodb", "documentdb");
   return mod.MongoClient;
 }
 
@@ -79,10 +71,7 @@ function poolOptions(opts: PoolOptions): MongoClientOptions {
   };
 }
 
-async function construct(
-  uri: string,
-  options: MongoClientOptions,
-): Promise<MongoClient> {
+async function construct(uri: string, options: MongoClientOptions): Promise<MongoClient> {
   // Resolve the constructor outside the try so a missing-package CloudRiftError
   // (the actionable "install mongodb ..." hint) propagates unchanged instead of
   // being re-wrapped as a DocumentConnectionError.
@@ -93,17 +82,15 @@ async function construct(
     if (err instanceof CloudRiftError) {
       throw err;
     }
-    throw new DocumentConnectionError(
-      `Failed to connect to DocumentDB: ${String(err)}`,
-      { cause: err },
-    );
+    throw new DocumentConnectionError(`Failed to connect to DocumentDB: ${String(err)}`, {
+      cause: err,
+    });
   }
 }
 
 /** Connect using a full MongoDB-compatible URI. */
 export async function connectUri(
-  opts: { uri: string; tlsCaFile?: string } & PoolOptions &
-    Record<string, unknown>,
+  opts: { uri: string; tlsCaFile?: string } & PoolOptions & Record<string, unknown>,
 ): Promise<MongoClient> {
   const { uri, tlsCaFile, maxPoolSize, minPoolSize, ...rest } = opts;
   const options: MongoClientOptions = {
@@ -129,9 +116,7 @@ export async function connectCredentials(
   } & PoolOptions,
 ): Promise<MongoClient> {
   const { host, port, username, password, tls = true, tlsCaFile } = opts;
-  const uri = `mongodb://${quotePlus(username)}:${quotePlus(
-    password,
-  )}@${host}:${port}/`;
+  const uri = `mongodb://${quotePlus(username)}:${quotePlus(password)}@${host}:${port}/`;
   const options: MongoClientOptions = {
     tls,
     ...poolOptions(opts),
@@ -154,9 +139,7 @@ export async function connectTlsCert(
   } & PoolOptions,
 ): Promise<MongoClient> {
   const { host, port, username, password, tlsCertKeyFile, tlsCaFile } = opts;
-  const uri = `mongodb://${quotePlus(username)}:${quotePlus(
-    password,
-  )}@${host}:${port}/`;
+  const uri = `mongodb://${quotePlus(username)}:${quotePlus(password)}@${host}:${port}/`;
   const options: MongoClientOptions = {
     tls: true,
     tlsCertificateKeyFile: tlsCertKeyFile,

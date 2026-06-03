@@ -18,7 +18,15 @@
 export * from "./core/index.js";
 
 // --- storage ---
-export { StorageBackend, AWSS3Backend, AWSS3Client, AzureBlobBackend, AzureBlobClient, getStorage, getStorageClient } from "./storage/index.js";
+export {
+  StorageBackend,
+  AWSS3Backend,
+  AWSS3Client,
+  AzureBlobBackend,
+  AzureBlobClient,
+  getStorage,
+  getStorageClient,
+} from "./storage/index.js";
 export type {
   BinaryInput,
   ObjectMetadata,
@@ -30,7 +38,12 @@ export type {
 } from "./storage/index.js";
 
 // --- messaging ---
-export { MessagingBackend, AWSSQSBackend, AzureServiceBusBackend, getQueue } from "./messaging/index.js";
+export {
+  MessagingBackend,
+  AWSSQSBackend,
+  AzureServiceBusBackend,
+  getQueue,
+} from "./messaging/index.js";
 export type { Message, QueueProvider } from "./messaging/index.js";
 
 // --- cache ---
@@ -52,7 +65,12 @@ export type {
 } from "./cache/index.js";
 
 // --- secrets ---
-export { SecretBackend, AWSSecretsManagerBackend, AzureKeyVaultBackend, getSecrets } from "./secrets/index.js";
+export {
+  SecretBackend,
+  AWSSecretsManagerBackend,
+  AzureKeyVaultBackend,
+  getSecrets,
+} from "./secrets/index.js";
 export type { SecretsProvider } from "./secrets/index.js";
 
 // --- pubsub ---
@@ -70,8 +88,4 @@ export {
   setDocumentDbClientConstructor,
   setCosmosClientConstructor,
 } from "./document/index.js";
-export type {
-  DocumentProvider,
-  MongoClientConstructor,
-  PoolOptions,
-} from "./document/index.js";
+export type { DocumentProvider, MongoClientConstructor, PoolOptions } from "./document/index.js";

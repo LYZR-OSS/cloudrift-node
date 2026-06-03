@@ -13,11 +13,7 @@
 
 import { Readable } from "node:stream";
 
-import {
-  ObjectNotFoundError,
-  StorageError,
-  StoragePermissionError,
-} from "../core/errors.js";
+import { ObjectNotFoundError, StorageError, StoragePermissionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 import { StorageBackend } from "./base.js";
 import type { BinaryInput, ObjectMetadata } from "./base.js";
@@ -58,9 +54,7 @@ interface AzureBlockBlobClient {
 
 interface AzureContainerClient {
   getBlockBlobClient(blobName: string): AzureBlockBlobClient;
-  listBlobsFlat(options?: {
-    prefix?: string;
-  }): AsyncIterable<{ name: string }>;
+  listBlobsFlat(options?: { prefix?: string }): AsyncIterable<{ name: string }>;
 }
 
 interface AzureServiceClient {
@@ -76,15 +70,9 @@ interface AzureClosableCredential {
 interface AzureBlobModule {
   BlobServiceClient: {
     fromConnectionString(connectionString: string): AzureServiceClient;
-    new (
-      url: string,
-      credential?: unknown,
-    ): AzureServiceClient;
+    new (url: string, credential?: unknown): AzureServiceClient;
   };
-  StorageSharedKeyCredential: new (
-    accountName: string,
-    accountKey: string,
-  ) => unknown;
+  StorageSharedKeyCredential: new (accountName: string, accountKey: string) => unknown;
   BlobSASPermissions: { parse(permissions: string): unknown };
   generateBlobSASQueryParameters: (
     values: {
@@ -122,9 +110,7 @@ export class AzureBlobClient {
     this._credential = credential;
   }
 
-  static async fromConnectionString(opts: {
-    connectionString: string;
-  }): Promise<AzureBlobClient> {
+  static async fromConnectionString(opts: { connectionString: string }): Promise<AzureBlobClient> {
     const mod = await loadOptional<AzureBlobModule>(PKG, PROVIDER);
     const accountKey = parseConnStringField(opts.connectionString, "AccountKey");
     const service = mod.BlobServiceClient.fromConnectionString(opts.connectionString);
@@ -183,11 +169,7 @@ export class AzureBlobClient {
         clientSecret: string,
       ) => AzureClosableCredential;
     }>(IDENTITY_PKG, PROVIDER);
-    const credential = new ClientSecretCredential(
-      opts.tenantId,
-      opts.clientId,
-      opts.clientSecret,
-    );
+    const credential = new ClientSecretCredential(opts.tenantId, opts.clientId, opts.clientSecret);
     const service = new mod.BlobServiceClient(opts.accountUrl, credential);
     return new AzureBlobClient(mod, service, undefined, credential);
   }
@@ -329,9 +311,7 @@ export class AzureBlobBackend extends StorageBackend {
     const container = this.service.getContainerClient(this.container);
     try {
       const keys: string[] = [];
-      for await (const blob of container.listBlobsFlat(
-        prefix ? { prefix } : undefined,
-      )) {
+      for await (const blob of container.listBlobsFlat(prefix ? { prefix } : undefined)) {
         keys.push(blob.name);
       }
       return keys;
@@ -373,10 +353,7 @@ export class AzureBlobBackend extends StorageBackend {
     }
     const mod = this._client._mod;
     try {
-      const credential = new mod.StorageSharedKeyCredential(
-        this.service.accountName,
-        accountKey,
-      );
+      const credential = new mod.StorageSharedKeyCredential(this.service.accountName, accountKey);
       const sas = mod
         .generateBlobSASQueryParameters(
           {
@@ -400,9 +377,7 @@ export class AzureBlobBackend extends StorageBackend {
   async copy(srcKey: string, dstKey: string, dstBucket?: string): Promise<string> {
     const targetContainer = dstBucket ?? this.container;
     const srcBlob = this.blob(srcKey);
-    const dstBlob = this.service
-      .getContainerClient(targetContainer)
-      .getBlockBlobClient(dstKey);
+    const dstBlob = this.service.getContainerClient(targetContainer).getBlockBlobClient(dstKey);
     try {
       const poller = await dstBlob.beginCopyFromURL(srcBlob.url);
       await poller.pollUntilDone();

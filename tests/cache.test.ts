@@ -216,12 +216,7 @@ describe("BaseRedisBackend ops", () => {
 
   it("pipeline exec runs queued commands atomically", async () => {
     cache = makeCache();
-    const results = await cache
-      .pipeline()
-      .set("p1", "1")
-      .incr("p1")
-      .get("p1")
-      .exec();
+    const results = await cache.pipeline().set("p1", "1").incr("p1").get("p1").exec();
     // ioredis exec returns [error, value] tuples per command.
     expect(results.length).toBe(3);
     const last = results[2] as [unknown, Buffer];
@@ -252,25 +247,15 @@ describe("getCache factory dispatch", () => {
   });
 
   it("throws CloudRiftError on unknown auth method for a valid provider", async () => {
-    await expect(getCache("redis", "from_nonsense", {})).rejects.toThrow(
-      CloudRiftError,
-    );
-    await expect(getCache("redis", "from_nonsense", {})).rejects.toThrow(
-      /no auth method/,
-    );
+    await expect(getCache("redis", "from_nonsense", {})).rejects.toThrow(CloudRiftError);
+    await expect(getCache("redis", "from_nonsense", {})).rejects.toThrow(/no auth method/);
   });
 
   it("maps snake_case method to the matching provider constructor", async () => {
     // from_iam_auth exists only on elasticache; from_url only on redis.
-    await expect(getCache("redis", "from_iam_auth", {})).rejects.toThrow(
-      /no auth method/,
-    );
-    await expect(getCache("elasticache", "from_url", {})).rejects.toThrow(
-      /no auth method/,
-    );
-    await expect(getCache("azure_redis", "from_url", {})).rejects.toThrow(
-      /no auth method/,
-    );
+    await expect(getCache("redis", "from_iam_auth", {})).rejects.toThrow(/no auth method/);
+    await expect(getCache("elasticache", "from_url", {})).rejects.toThrow(/no auth method/);
+    await expect(getCache("azure_redis", "from_url", {})).rejects.toThrow(/no auth method/);
   });
 });
 
