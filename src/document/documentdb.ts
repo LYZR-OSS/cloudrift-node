@@ -7,13 +7,21 @@
  *
  * Lifecycle is caller-managed: call `client.close()` at shutdown.
  */
-import type { MongoClient, MongoClientOptions } from "mongodb";
-
 import { CloudRiftError, DocumentConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 
+export type MongoClientOptionsLike = Record<string, unknown>;
+
+export interface MongoClientLike {
+  db(name?: string, options?: unknown): any;
+  close(force?: boolean): Promise<void>;
+}
+
 /** Constructor signature for the native `mongodb` `MongoClient`. */
-export type MongoClientConstructor = new (uri: string, options?: MongoClientOptions) => MongoClient;
+export type MongoClientConstructor = new (
+  uri: string,
+  options?: MongoClientOptionsLike,
+) => MongoClientLike;
 
 /** Connection-pool sizing options shared by every connect helper. */
 export interface PoolOptions {
@@ -64,14 +72,14 @@ async function resolveCtor(): Promise<MongoClientConstructor> {
   return mod.MongoClient;
 }
 
-function poolOptions(opts: PoolOptions): MongoClientOptions {
+function poolOptions(opts: PoolOptions): MongoClientOptionsLike {
   return {
     maxPoolSize: opts.maxPoolSize ?? DEFAULT_MAX_POOL_SIZE,
     minPoolSize: opts.minPoolSize ?? DEFAULT_MIN_POOL_SIZE,
   };
 }
 
-async function construct(uri: string, options: MongoClientOptions): Promise<MongoClient> {
+async function construct(uri: string, options: MongoClientOptionsLike): Promise<MongoClientLike> {
   // Resolve the constructor outside the try so a missing-package CloudRiftError
   // (the actionable "install mongodb ..." hint) propagates unchanged instead of
   // being re-wrapped as a DocumentConnectionError.
@@ -91,16 +99,16 @@ async function construct(uri: string, options: MongoClientOptions): Promise<Mong
 /** Connect using a full MongoDB-compatible URI. */
 export async function connectUri(
   opts: { uri: string; tlsCaFile?: string } & PoolOptions & Record<string, unknown>,
-): Promise<MongoClient> {
+): Promise<MongoClientLike> {
   const { uri, tlsCaFile, maxPoolSize, minPoolSize, ...rest } = opts;
-  const options: MongoClientOptions = {
+  const options: MongoClientOptionsLike = {
     ...poolOptions({ maxPoolSize, minPoolSize }),
   };
   if (tlsCaFile) {
     options.tlsCAFile = tlsCaFile;
   }
   // Passthrough of any extra client options (mirrors Python **client_kwargs).
-  Object.assign(options, rest as MongoClientOptions);
+  Object.assign(options, rest);
   return construct(uri, options);
 }
 
@@ -114,10 +122,10 @@ export async function connectCredentials(
     tls?: boolean;
     tlsCaFile?: string;
   } & PoolOptions,
-): Promise<MongoClient> {
+): Promise<MongoClientLike> {
   const { host, port, username, password, tls = true, tlsCaFile } = opts;
   const uri = `mongodb://${quotePlus(username)}:${quotePlus(password)}@${host}:${port}/`;
-  const options: MongoClientOptions = {
+  const options: MongoClientOptionsLike = {
     tls,
     ...poolOptions(opts),
   };
@@ -137,10 +145,10 @@ export async function connectTlsCert(
     tlsCertKeyFile: string;
     tlsCaFile?: string;
   } & PoolOptions,
-): Promise<MongoClient> {
+): Promise<MongoClientLike> {
   const { host, port, username, password, tlsCertKeyFile, tlsCaFile } = opts;
   const uri = `mongodb://${quotePlus(username)}:${quotePlus(password)}@${host}:${port}/`;
-  const options: MongoClientOptions = {
+  const options: MongoClientOptionsLike = {
     tls: true,
     tlsCertificateKeyFile: tlsCertKeyFile,
     ...poolOptions(opts),

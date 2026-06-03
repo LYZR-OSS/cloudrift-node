@@ -13,13 +13,56 @@
  * with the original error attached as `cause`.
  *
  * The `ioredis` package is an optional peer dependency. It is loaded lazily in
- * the provider factory constructors and the constructed client is injected here;
- * this module only type-imports it.
  */
-import type { Redis, ChainableCommander } from "ioredis";
-
 import { CacheError } from "../core/errors.js";
 import { CacheBackend, type CachePipeline, type CacheValue } from "./base.js";
+
+export interface RedisPipelineLike {
+  set(...args: unknown[]): unknown;
+  getBuffer(key: string): unknown;
+  del(...keys: string[]): unknown;
+  incr(key: string): unknown;
+  exec(): Promise<unknown[] | null>;
+}
+
+export interface RedisClientLike {
+  getBuffer(key: string): Promise<Buffer | null>;
+  set(...args: unknown[]): Promise<unknown>;
+  del(...keys: string[]): Promise<number>;
+  exists(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<number>;
+  ttl(key: string): Promise<number>;
+  keys(pattern: string): Promise<string[]>;
+  hgetBuffer(key: string, field: string): Promise<Buffer | null>;
+  hset(key: string, field: string, value: CacheValue): Promise<number>;
+  hgetallBuffer(key: string): Promise<Record<string, Buffer>>;
+  hdel(key: string, ...fields: string[]): Promise<number>;
+  lpush(key: string, ...values: CacheValue[]): Promise<number>;
+  rpush(key: string, ...values: CacheValue[]): Promise<number>;
+  lrangeBuffer(key: string, start: number, stop: number): Promise<Buffer[]>;
+  llen(key: string): Promise<number>;
+  incr(key: string): Promise<number>;
+  decr(key: string): Promise<number>;
+  mgetBuffer(...keys: string[]): Promise<Array<Buffer | null>>;
+  mset(mapping: Record<string, CacheValue>): Promise<unknown>;
+  ping(): Promise<string>;
+  flushdb(): Promise<unknown>;
+  quit(): Promise<unknown>;
+  multi(): RedisPipelineLike;
+  on(event: string, listener: (...args: unknown[]) => void): unknown;
+  options: {
+    password?: string;
+  };
+}
+
+export interface RedisOptionsLike {
+  host?: string;
+  port?: number;
+  db?: number;
+  username?: string;
+  password?: string;
+  tls?: unknown;
+}
 
 /**
  * Wrap an unknown thrown value as a `CacheError`, preserving the original via
@@ -38,7 +81,7 @@ function toCacheError(e: unknown): CacheError {
  * ioredis (parity with redis-py raising on `execute()`).
  */
 class RedisPipeline implements CachePipeline {
-  constructor(private readonly multi: ChainableCommander) {}
+  constructor(private readonly multi: RedisPipelineLike) {}
 
   set(key: string, value: CacheValue, ttl?: number): this {
     if (ttl !== undefined && ttl !== null) {
@@ -79,9 +122,9 @@ class RedisPipeline implements CachePipeline {
  * Concrete providers pass the constructed `Redis` instance up to this base.
  */
 export abstract class BaseRedisBackend extends CacheBackend {
-  protected readonly client: Redis;
+  protected readonly client: RedisClientLike;
 
-  constructor(client: Redis) {
+  constructor(client: RedisClientLike) {
     super();
     this.client = client;
   }

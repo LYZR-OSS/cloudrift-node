@@ -23,8 +23,18 @@ clear failure modes, reusable clients, and deterministic cleanup.
 - Permission/auth failure: map to the domain permission class where one exists.
 - Send/publish batch partial failure: throw the domain send/publish error, not a generic
   base error.
+- Provider batch capacity is a contract boundary. If a provider has a hard batch limit,
+  chunk deterministically or reject before sending. Do not silently drop messages when
+  SDK capacity helpers such as Service Bus `tryAddMessage()` return `false`.
 - Document operations are the exception: after `MongoClient` construction, operation
   failures remain native MongoDB driver errors.
+
+## Optional Dependency Surface
+
+- Lazy dynamic imports must be mirrored in `peerDependencies`, `peerDependenciesMeta`,
+  and dev dependencies so installed packages and local tests resolve the same SDK names.
+- Public declarations must not force consumers to install optional provider SDKs just to
+  type-check CloudRift-owned APIs. Use structural CloudRift types at package boundaries.
 
 ## No Hidden Retries
 

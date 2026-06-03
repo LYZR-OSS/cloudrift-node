@@ -8,15 +8,6 @@
  * the factory-produced view owns the client and tears it down on `close()`.
  */
 
-import type {
-  S3Client as S3ClientType,
-  S3ClientConfig,
-  GetObjectCommandOutput,
-  HeadObjectCommandOutput,
-  ListObjectsV2CommandOutput,
-} from "@aws-sdk/client-s3";
-import type { AwsCredentialIdentity } from "@aws-sdk/types";
-
 import { ObjectNotFoundError, StorageError, StoragePermissionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
 import { StorageBackend } from "./base.js";
@@ -26,30 +17,66 @@ const PROVIDER = "s3";
 const PKG = "@aws-sdk/client-s3";
 const PRESIGNER_PKG = "@aws-sdk/s3-request-presigner";
 
-type AnyCommand = Parameters<S3ClientType["send"]>[0];
+interface AwsCredentialIdentityLike {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+}
+
+interface S3ClientConfigLike {
+  region?: string;
+  endpoint?: string;
+  credentials?: unknown;
+  requestHandler?: unknown;
+}
+
+interface S3ClientLike {
+  send(command: object): Promise<unknown>;
+  destroy(): void;
+}
+
+interface GetObjectResponseLike {
+  Body?: {
+    transformToByteArray(): Promise<Uint8Array>;
+  };
+}
+
+interface ListObjectsV2ResponseLike {
+  Contents?: Array<{ Key?: string }>;
+  IsTruncated?: boolean;
+  NextContinuationToken?: string;
+}
+
+interface HeadObjectResponseLike {
+  ContentType?: string;
+  ContentLength?: number;
+  LastModified?: Date;
+  ETag?: string;
+  Metadata?: Record<string, string>;
+}
 
 /** Lazily-loaded `@aws-sdk/client-s3` module surface used by this adapter. */
 interface S3Module {
-  S3Client: new (config: S3ClientConfig) => S3ClientType;
-  PutObjectCommand: new (input: Record<string, unknown>) => AnyCommand;
-  GetObjectCommand: new (input: Record<string, unknown>) => AnyCommand;
-  HeadObjectCommand: new (input: Record<string, unknown>) => AnyCommand;
-  DeleteObjectCommand: new (input: Record<string, unknown>) => AnyCommand;
-  ListObjectsV2Command: new (input: Record<string, unknown>) => AnyCommand;
-  CopyObjectCommand: new (input: Record<string, unknown>) => AnyCommand;
+  S3Client: new (config: S3ClientConfigLike) => S3ClientLike;
+  PutObjectCommand: new (input: Record<string, unknown>) => object;
+  GetObjectCommand: new (input: Record<string, unknown>) => object;
+  HeadObjectCommand: new (input: Record<string, unknown>) => object;
+  DeleteObjectCommand: new (input: Record<string, unknown>) => object;
+  ListObjectsV2Command: new (input: Record<string, unknown>) => object;
+  CopyObjectCommand: new (input: Record<string, unknown>) => object;
 }
 
 interface PresignerModule {
   getSignedUrl: (
-    client: S3ClientType,
-    command: AnyCommand,
+    client: S3ClientLike,
+    command: object,
     options: { expiresIn?: number },
   ) => Promise<string>;
 }
 
 /** Shared client config built by the factory constructors. */
 interface S3ClientFactoryConfig {
-  credentials?: AwsCredentialIdentity;
+  credentials?: AwsCredentialIdentityLike;
   region: string;
   endpointUrl?: string;
   profileName?: string;
@@ -106,16 +133,16 @@ function buildFactoryConfig(
  */
 export class AWSS3Client {
   private readonly config: S3ClientFactoryConfig;
-  private clientPromise: Promise<S3ClientType> | null = null;
+  private clientPromise: Promise<S3ClientLike> | null = null;
   /** @internal Exposed for parity with the Python test surface (`client._client`). */
-  _client: S3ClientType | null = null;
+  _client: S3ClientLike | null = null;
 
   constructor(config: S3ClientFactoryConfig) {
     this.config = config;
   }
 
   static fromAccessKey(opts: AwsAccessKeyOptions): AWSS3Client {
-    const credentials: AwsCredentialIdentity = {
+    const credentials: AwsCredentialIdentityLike = {
       accessKeyId: opts.awsAccessKeyId,
       secretAccessKey: opts.awsSecretAccessKey,
       ...(opts.awsSessionToken ? { sessionToken: opts.awsSessionToken } : {}),
@@ -151,16 +178,16 @@ export class AWSS3Client {
    * Python `_ensure()` lock-guarded init.
    * @internal
    */
-  async ensure(): Promise<S3ClientType> {
+  async ensure(): Promise<S3ClientLike> {
     if (this.clientPromise === null) {
       this.clientPromise = this.create();
     }
     return this.clientPromise;
   }
 
-  private async create(): Promise<S3ClientType> {
+  private async create(): Promise<S3ClientLike> {
     const mod = await loadOptional<S3Module>(PKG, PROVIDER);
-    const config: S3ClientConfig = {
+    const config: S3ClientConfigLike = {
       region: this.config.region,
       requestHandler: {
         connectionTimeout: this.config.connectTimeout * 1000,
@@ -177,7 +204,7 @@ export class AWSS3Client {
       config.credentials = this.config.credentials;
     } else if (this.config.profileName) {
       const { fromIni } = await loadOptional<{
-        fromIni: (init: { profile: string }) => S3ClientConfig["credentials"];
+        fromIni: (init: { profile: string }) => unknown;
       }>("@aws-sdk/credential-provider-ini", PROVIDER);
       config.credentials = fromIni({ profile: this.config.profileName });
     }
@@ -256,7 +283,7 @@ export class AWSS3Backend extends StorageBackend {
     try {
       const response = (await client.send(
         new mod.GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      )) as GetObjectCommandOutput;
+      )) as GetObjectResponseLike;
       const body = response.Body;
       if (!body) {
         return Buffer.alloc(0);
@@ -302,7 +329,7 @@ export class AWSS3Backend extends StorageBackend {
             Prefix: prefix,
             ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
           }),
-        )) as ListObjectsV2CommandOutput;
+        )) as ListObjectsV2ResponseLike;
         for (const obj of page.Contents ?? []) {
           if (obj.Key !== undefined) {
             keys.push(obj.Key);
@@ -320,7 +347,7 @@ export class AWSS3Backend extends StorageBackend {
     const [client, mod] = await Promise.all([this._client.ensure(), this.mod()]);
     let continuationToken: string | undefined;
     do {
-      let page: ListObjectsV2CommandOutput;
+      let page: ListObjectsV2ResponseLike;
       try {
         page = (await client.send(
           new mod.ListObjectsV2Command({
@@ -328,7 +355,7 @@ export class AWSS3Backend extends StorageBackend {
             Prefix: prefix,
             ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
           }),
-        )) as ListObjectsV2CommandOutput;
+        )) as ListObjectsV2ResponseLike;
       } catch (err) {
         this.raise(err, prefix);
       }
@@ -377,7 +404,7 @@ export class AWSS3Backend extends StorageBackend {
     try {
       const response = (await client.send(
         new mod.HeadObjectCommand({ Bucket: this.bucket, Key: key }),
-      )) as HeadObjectCommandOutput;
+      )) as HeadObjectResponseLike;
       return {
         contentType: response.ContentType,
         size: response.ContentLength ?? 0,

@@ -18,14 +18,17 @@
 import { readFileSync } from "node:fs";
 import type { ConnectionOptions } from "node:tls";
 
-import type { AwsCredentialIdentity } from "@smithy/types";
-import type { RedisOptions, Redis as RedisDefault } from "ioredis";
-
 import { CacheConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
-import { BaseRedisBackend } from "./redisBase.js";
+import { BaseRedisBackend, type RedisClientLike, type RedisOptionsLike } from "./redisBase.js";
 
-type RedisModule = { default: new (options: RedisOptions) => RedisDefault };
+interface AwsCredentialIdentityLike {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+}
+
+type RedisModule = { default: new (options: RedisOptionsLike) => RedisClientLike };
 
 async function loadRedis(): Promise<RedisModule["default"]> {
   const mod = await loadOptional<RedisModule>("ioredis", "elasticache");
@@ -63,7 +66,7 @@ export interface IamTokenParams {
   port: number;
   username: string;
   region: string;
-  credentials: AwsCredentialIdentity;
+  credentials: AwsCredentialIdentityLike;
 }
 
 /**
@@ -140,7 +143,7 @@ async function resolveCredentials(opts: {
   awsSecretAccessKey?: string;
   awsSessionToken?: string;
   profileName?: string;
-}): Promise<AwsCredentialIdentity> {
+}): Promise<AwsCredentialIdentityLike> {
   if (opts.awsAccessKeyId && opts.awsSecretAccessKey) {
     return {
       accessKeyId: opts.awsAccessKeyId,
@@ -176,7 +179,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
     try {
       const Redis = await loadRedis();
       const ssl = opts.ssl ?? true;
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port: opts.port ?? 6379,
         db: opts.db ?? 0,
@@ -239,7 +242,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
 
       const initialToken = await genToken();
 
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port,
         db: opts.db ?? 0,
@@ -275,7 +278,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
   }): Promise<AWSElastiCacheBackend> {
     try {
       const Redis = await loadRedis();
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port: opts.port ?? 6380,
         db: opts.db ?? 0,
@@ -313,7 +316,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
  * before scheduling a reconnect, so the refreshed password is in place by the
  * time the next connection is opened.
  */
-function attachIamTokenRefresh(client: RedisDefault, genToken: () => Promise<string>): void {
+function attachIamTokenRefresh(client: RedisClientLike, genToken: () => Promise<string>): void {
   client.on("close", () => {
     genToken()
       .then((token) => {

@@ -69,6 +69,17 @@ system-test harness:
 - `tests/secrets.test.ts` and `tests/pubsub.test.ts` cover AWS command shapes, batch
   behavior, profile dispatch, and error classes.
 
+Fixed regression targets from the latest review:
+
+- SNS and Secrets Manager profile factories load `fromIni({ profile })`.
+- SQS `sendBatch` covers 25 messages and chunks at the AWS 10-entry limit.
+- Service Bus `sendBatch` covers `tryAddMessage()` returning `false`, including an
+  oversized single message.
+- `getQueue("azure_bus", ...)` remains the Python-compatible dispatch path.
+- ElastiCache IAM dynamic imports are represented in dependency metadata.
+- Declaration output was manually checked to avoid optional SDK nominal imports; convert
+  this to a CI inventory check.
+
 Known improvement targets:
 
 - Add a deterministic local-emulator layer for AWS storage, messaging, secrets, and

@@ -68,11 +68,13 @@
     "@aws-sdk/client-sqs": "^3.0.0",
     "@aws-sdk/credential-providers": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "@aws-crypto/sha256-js": "^5.0.0",
     "@azure/eventgrid": "^5.0.0",
     "@azure/identity": "^4.0.0",
     "@azure/keyvault-secrets": "^4.0.0",
     "@azure/service-bus": "^7.0.0",
     "@azure/storage-blob": "^12.0.0",
+    "@smithy/signature-v4": "^5.0.0",
     "ioredis": "^5.0.0",
     "mongodb": "^6.0.0"
   },
@@ -81,6 +83,9 @@
       "optional": true
     },
     "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    },
+    "@aws-crypto/sha256-js": {
       "optional": true
     },
     "@aws-sdk/client-sqs": {
@@ -115,9 +120,13 @@
     },
     "mongodb": {
       "optional": true
+    },
+    "@smithy/signature-v4": {
+      "optional": true
     }
   },
   "devDependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
     "@aws-sdk/client-s3": "^3.700.0",
     "@aws-sdk/client-secrets-manager": "^3.700.0",
     "@aws-sdk/client-sns": "^3.700.0",
@@ -130,6 +139,7 @@
     "@azure/service-bus": "^7.9.5",
     "@azure/storage-blob": "^12.26.0",
     "@eslint/js": "^10.0.1",
+    "@smithy/signature-v4": "^5.3.0",
     "@types/node": "^22.10.0",
     "aws-sdk-client-mock": "^4.1.0",
     "eslint": "^10.4.1",

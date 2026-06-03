@@ -11,8 +11,6 @@
  *     await client.db("mydb").collection("users").insertOne({ name: "Alice" });
  *     await client.close();
  */
-import type { MongoClient } from "mongodb";
-
 import { normalizeChoice } from "../core/providers.js";
 import { connectCredentials, connectTlsCert, connectUri } from "./documentdb.js";
 import { connectAccountKey, connectConnectionString } from "./cosmos.js";
@@ -27,7 +25,7 @@ export {
   connectUri,
   setMongoClientConstructor as setDocumentDbClientConstructor,
 } from "./documentdb.js";
-export type { MongoClientConstructor, PoolOptions } from "./documentdb.js";
+export type { MongoClientConstructor, MongoClientLike, PoolOptions } from "./documentdb.js";
 export {
   connectAccountKey,
   connectConnectionString,
@@ -50,7 +48,7 @@ function has(options: Record<string, unknown>, key: string): boolean {
 export async function getMongodb(
   provider: DocumentProvider | string,
   options: Record<string, unknown>,
-): Promise<MongoClient> {
+): Promise<import("./documentdb.js").MongoClientLike> {
   switch (normalizeChoice("document DB provider", provider, DOCUMENT_PROVIDERS)) {
     case "documentdb":
       if (has(options, "uri")) {

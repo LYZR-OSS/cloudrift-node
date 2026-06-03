@@ -12,14 +12,13 @@
 import { readFileSync } from "node:fs";
 import type { ConnectionOptions } from "node:tls";
 
-import type { RedisOptions, Redis as RedisDefault } from "ioredis";
-
 import { CacheConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
-import { BaseRedisBackend } from "./redisBase.js";
+import { BaseRedisBackend, type RedisClientLike, type RedisOptionsLike } from "./redisBase.js";
 
 /** Minimal shape of the lazily-imported ioredis module's default export. */
-type RedisModule = { default: new (options: RedisOptions) => RedisDefault };
+type RedisConstructor = new (options: RedisOptionsLike) => RedisClientLike;
+type RedisModule = { default: RedisConstructor };
 
 /** Load the ioredis constructor lazily (optional peer dependency). */
 async function loadRedis(): Promise<RedisModule["default"]> {
@@ -70,14 +69,14 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
       const Redis = await loadRedis();
       const tls = buildTls({ sslCaCerts: opts.sslCaCerts });
       // ioredis accepts the URL via the `path`-like first arg through options.
-      const options: RedisOptions = {};
+      const options: RedisOptionsLike = {};
       if (tls) {
         options.tls = tls;
       }
       const RedisCtor = Redis as unknown as new (
         url: string,
-        options: RedisOptions,
-      ) => RedisDefault;
+        options: RedisOptionsLike,
+      ) => RedisClientLike;
       const client = new RedisCtor(opts.url, options);
       return new StandaloneRedisBackend(client);
     } catch (e) {
@@ -104,7 +103,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
   }): Promise<StandaloneRedisBackend> {
     try {
       const Redis = await loadRedis();
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port: opts.port ?? 6379,
         db: opts.db ?? 0,
@@ -140,7 +139,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
   }): Promise<StandaloneRedisBackend> {
     try {
       const Redis = await loadRedis();
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port: opts.port ?? 6380,
         db: opts.db ?? 0,

@@ -85,6 +85,31 @@ describe("AWSSQSBackend", () => {
     ]);
   });
 
+  it("sendBatch chunks inputs over the AWS limit of 10 entries", async () => {
+    sqsMock.on(SendMessageBatchCommand).callsFake((input) => {
+      const entries = input.Entries as Array<{ Id: string }>;
+      return {
+        Successful: entries.map((entry) => ({
+          Id: entry.Id,
+          MessageId: `msg-${entry.Id}`,
+          MD5OfMessageBody: "md5",
+        })),
+      };
+    });
+
+    const messages = Array.from({ length: 25 }, (_, n) => ({ n }));
+    const ids = await backend.sendBatch(messages);
+
+    expect(ids).toEqual(messages.map((_, n) => `msg-${n}`));
+    const calls = sqsMock.commandCalls(SendMessageBatchCommand);
+    expect(calls).toHaveLength(3);
+    expect(calls.map((call) => call.args[0].input.Entries?.length)).toEqual([10, 10, 5]);
+    expect(calls[1].args[0].input.Entries?.[0]).toMatchObject({
+      Id: "10",
+      MessageBody: JSON.stringify({ n: 10 }),
+    });
+  });
+
   it("sendBatch throws MessageSendError when an entry fails", async () => {
     sqsMock.on(SendMessageBatchCommand).resolves({
       Successful: [{ Id: "0", MessageId: "a", MD5OfMessageBody: "x" }],

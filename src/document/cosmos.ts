@@ -11,11 +11,15 @@
  *
  * Lifecycle is caller-managed: call `client.close()` at shutdown.
  */
-import type { MongoClient, MongoClientOptions } from "mongodb";
-
 import { CloudRiftError, DocumentConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
-import { quotePlus, type MongoClientConstructor, type PoolOptions } from "./documentdb.js";
+import {
+  quotePlus,
+  type MongoClientConstructor,
+  type MongoClientLike,
+  type MongoClientOptionsLike,
+  type PoolOptions,
+} from "./documentdb.js";
 
 const DEFAULT_MAX_POOL_SIZE = 100;
 const DEFAULT_MIN_POOL_SIZE = 0;
@@ -40,14 +44,14 @@ async function resolveCtor(): Promise<MongoClientConstructor> {
   return mod.MongoClient;
 }
 
-function poolOptions(opts: PoolOptions): MongoClientOptions {
+function poolOptions(opts: PoolOptions): MongoClientOptionsLike {
   return {
     maxPoolSize: opts.maxPoolSize ?? DEFAULT_MAX_POOL_SIZE,
     minPoolSize: opts.minPoolSize ?? DEFAULT_MIN_POOL_SIZE,
   };
 }
 
-async function construct(uri: string, options: MongoClientOptions): Promise<MongoClient> {
+async function construct(uri: string, options: MongoClientOptionsLike): Promise<MongoClientLike> {
   // Resolve the constructor outside the try so a missing-package CloudRiftError
   // (the actionable "install mongodb ..." hint) propagates unchanged.
   const Ctor = await resolveCtor();
@@ -66,7 +70,7 @@ async function construct(uri: string, options: MongoClientOptions): Promise<Mong
 /** Connect using a Cosmos MongoDB-API connection string from the Azure portal. */
 export async function connectConnectionString(
   opts: { connectionString: string } & PoolOptions,
-): Promise<MongoClient> {
+): Promise<MongoClientLike> {
   const { connectionString } = opts;
   return construct(connectionString, poolOptions(opts));
 }
@@ -79,7 +83,7 @@ export async function connectAccountKey(
     port?: number;
     appName?: string;
   } & PoolOptions,
-): Promise<MongoClient> {
+): Promise<MongoClientLike> {
   const { account, accountKey, port = DEFAULT_PORT, appName } = opts;
   const user = quotePlus(account);
   const pwd = quotePlus(accountKey);

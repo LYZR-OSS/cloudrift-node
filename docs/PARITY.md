@@ -27,6 +27,19 @@ When behavior is unclear, resolve it in this order:
 Provider strings, auth method strings, factory precedence, error categories, lifecycle,
 and default methods are parity-sensitive.
 
+## Parity-Sensitive Fixes
+
+These review findings are fixed behavior, not intentional divergences. Keep them covered
+when refactoring provider factories.
+
+- Python messaging uses provider literal `azure_bus`; TypeScript accepts it and keeps
+  `azure_service_bus` as a compatibility alias.
+- AWS `from_profile` semantics require the AWS shared-profile credential provider
+  (`fromIni` in the AWS SDK for JavaScript) for SQS, SNS, Secrets Manager, and S3.
+- Provider batch limits are part of behavior: SNS and SQS batch APIs chunk to the
+  10-entry AWS limit, and Azure Service Bus batches honor `tryAddMessage()` capacity
+  failures.
+
 ## Intentional Divergences
 
 These divergences are retained because they are safer or more idiomatic in TypeScript:

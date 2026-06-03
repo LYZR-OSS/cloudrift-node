@@ -13,14 +13,19 @@
  * as for ElastiCache IAM — we regenerate the token on socket close and write it
  * back into `client.options.password` so reconnections use a fresh token.
  */
-import type { AccessToken, TokenCredential } from "@azure/identity";
-import type { RedisOptions, Redis as RedisDefault } from "ioredis";
-
 import { CacheConnectionError } from "../core/errors.js";
 import { loadOptional } from "../core/lazy.js";
-import { BaseRedisBackend } from "./redisBase.js";
+import { BaseRedisBackend, type RedisClientLike, type RedisOptionsLike } from "./redisBase.js";
 
-type RedisModule = { default: new (options: RedisOptions) => RedisDefault };
+interface AccessTokenLike {
+  token: string;
+}
+
+interface TokenCredentialLike {
+  getToken(scope: string): Promise<AccessTokenLike | null>;
+}
+
+type RedisModule = { default: new (options: RedisOptionsLike) => RedisClientLike };
 
 const REDIS_RESOURCE = "https://redis.azure.com/.default";
 
@@ -34,8 +39,8 @@ function describe(e: unknown): string {
 }
 
 /** Fetch an Entra token for the Azure Cache for Redis resource scope. */
-async function fetchEntraToken(credential: TokenCredential): Promise<string> {
-  const token: AccessToken | null = await credential.getToken(REDIS_RESOURCE);
+async function fetchEntraToken(credential: TokenCredentialLike): Promise<string> {
+  const token = await credential.getToken(REDIS_RESOURCE);
   if (!token) {
     throw new Error("Entra credential returned no token");
   }
@@ -59,7 +64,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
     try {
       const Redis = await loadRedis();
       const ssl = opts.ssl ?? true;
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port: opts.port ?? 6380,
         db: opts.db ?? 0,
@@ -166,14 +171,14 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
       db?: number;
       ssl?: boolean;
     },
-    credential: TokenCredential,
+    credential: TokenCredentialLike,
     label: string,
   ): Promise<AzureRedisCacheBackend> {
     try {
       const Redis = await loadRedis();
       const ssl = opts.ssl ?? true;
       const initialToken = await fetchEntraToken(credential);
-      const options: RedisOptions = {
+      const options: RedisOptionsLike = {
         host: opts.host,
         port: opts.port ?? 6380,
         db: opts.db ?? 0,
@@ -200,7 +205,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
  * `client.options.password`, so reconnects use a fresh (non-expired) token.
  * See the ElastiCache equivalent for the rationale and limitations.
  */
-function attachEntraTokenRefresh(client: RedisDefault, genToken: () => Promise<string>): void {
+function attachEntraTokenRefresh(client: RedisClientLike, genToken: () => Promise<string>): void {
   client.on("close", () => {
     genToken()
       .then((token) => {

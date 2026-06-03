@@ -62,6 +62,7 @@ const DEFAULT_REGION = "us-east-1";
 const DEFAULT_MAX_POOL_CONNECTIONS = 50;
 const DEFAULT_CONNECT_TIMEOUT = 10; // seconds
 const DEFAULT_READ_TIMEOUT = 60; // seconds
+const SQS_SEND_BATCH_LIMIT = 10;
 
 /**
  * AWS SQS messaging backend (native async via `@aws-sdk/client-sqs`).
@@ -200,22 +201,27 @@ export class AWSSQSBackend extends MessagingBackend {
   async sendBatch(messages: Array<Record<string, unknown>>): Promise<string[]> {
     const client = await this.ensure();
     const sdk = await loadOptional<SqsModule>(SQS_PACKAGE, PROVIDER);
-    const entries = messages.map((msg, i) => ({
-      Id: String(i),
-      MessageBody: JSON.stringify(msg),
-    }));
+    const ids: string[] = [];
     try {
-      const response: SendMessageBatchCommandOutput = await client.send(
-        new sdk.SendMessageBatchCommand({
-          QueueUrl: this.queueUrl,
-          Entries: entries,
-        }),
-      );
-      if (response.Failed && response.Failed.length > 0) {
-        const failed = response.Failed.map((f) => f.Id);
-        throw new MessageSendError(`Failed to send messages with IDs: ${JSON.stringify(failed)}`);
+      for (let offset = 0; offset < messages.length; offset += SQS_SEND_BATCH_LIMIT) {
+        const chunk = messages.slice(offset, offset + SQS_SEND_BATCH_LIMIT);
+        const entries = chunk.map((msg, i) => ({
+          Id: String(offset + i),
+          MessageBody: JSON.stringify(msg),
+        }));
+        const response: SendMessageBatchCommandOutput = await client.send(
+          new sdk.SendMessageBatchCommand({
+            QueueUrl: this.queueUrl,
+            Entries: entries,
+          }),
+        );
+        if (response.Failed && response.Failed.length > 0) {
+          const failed = response.Failed.map((f) => f.Id);
+          throw new MessageSendError(`Failed to send messages with IDs: ${JSON.stringify(failed)}`);
+        }
+        ids.push(...(response.Successful ?? []).map((s) => s.MessageId ?? ""));
       }
-      return (response.Successful ?? []).map((s) => s.MessageId ?? "");
+      return ids;
     } catch (err) {
       throw this.mapError(err);
     }
