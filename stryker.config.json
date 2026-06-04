@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "mutate": ["src/**/*.ts", "!src/**/*.d.ts", "!src/index.ts", "!src/core/index.ts"],
+  "concurrency": 4,
+  "timeoutMS": 10000,
+  "reporters": ["clear-text", "json"],
+  "tempDirName": ".stryker-tmp"
+}

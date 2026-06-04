@@ -1,0 +1,139 @@
+# Surviving/NoCoverage mutants for pubsub wave
+
+
+## src/pubsub/sns.ts  (survived=34, nocov=68)
+L21:18 [Survived] StringLiteral => ""
+L71:93 [Survived] BlockStatement => {}
+L72:10 [Survived] ObjectLiteral => {}
+L74:25 [Survived] LogicalOperator => opts.maxPoolConnections && 25
+L75:21 [Survived] LogicalOperator => opts.connectTimeout && 10
+L76:18 [Survived] LogicalOperator => opts.readTimeout && 30
+L96:30 [Survived] ObjectLiteral => {}
+L98:30 [NoCoverage] StringLiteral => ""
+L98:15 [Survived] LogicalOperator => opts.region && "us-east-1"
+L99:20 [Survived] ObjectLiteral => {}
+L108:30 [Survived] ObjectLiteral => {}
+L110:30 [NoCoverage] StringLiteral => ""
+L110:15 [Survived] LogicalOperator => opts.region && "us-east-1"
+L117:30 [NoCoverage] StringLiteral => ""
+L117:15 [Survived] LogicalOperator => opts.region && "us-east-1"
+L127:36 [NoCoverage] BlockStatement => {}
+L127:9 [Survived] ConditionalExpression => false
+L130:9 [Survived] ConditionalExpression => true
+L146:34 [Survived] ObjectLiteral => {}
+L155:48 [NoCoverage] BlockStatement => {}
+L155:9 [Survived] ConditionalExpression => true
+L155:9 [Survived] ConditionalExpression => false
+L155:9 [Survived] EqualityOperator => this.config.endpointUrl === undefined
+L158:9 [Survived] ConditionalExpression => false
+L158:48 [Survived] BlockStatement => {}
+L159:25 [Survived] ObjectLiteral => {}
+L164:16 [Survived] ConditionalExpression => true
+L174:41 [Survived] BlockStatement => {}
+L175:9 [Survived] ConditionalExpression => false
+L175:36 [Survived] BlockStatement => {}
+L194:37 [Survived] ConditionalExpression => true
+L194:37 [Survived] EqualityOperator => Object.keys(attributes).length >= 0
+L201:36 [NoCoverage] StringLiteral => "Stryker was here!"
+L202:19 [NoCoverage] BlockStatement => {}
+L212:21 [Survived] EqualityOperator => i <= messages.length
+L219:45 [Survived] ConditionalExpression => true
+L219:45 [Survived] EqualityOperator => Object.keys(msg.attributes).length >= 0
+L234:13 [Survived] ConditionalExpression => true
+L235:46 [Survived] ArrowFunction => () => undefined
+L236:34 [Survived] StringLiteral => ``
+L238:48 [NoCoverage] ArrayDeclaration => ["Stryker was here"]
+L239:38 [NoCoverage] StringLiteral => "Stryker was here!"
+L242:13 [Survived] ConditionalExpression => true
+L262:57 [NoCoverage] BlockStatement => {}
+L264:9 [NoCoverage] ConditionalExpression => true
+L264:9 [NoCoverage] ConditionalExpression => false
+L264:9 [NoCoverage] LogicalOperator => code === "NotFound" && code === "NotFoundException"
+L264:9 [NoCoverage] ConditionalExpression => false
+L264:9 [NoCoverage] EqualityOperator => code !== "NotFound"
+L264:18 [NoCoverage] StringLiteral => ""
+L264:32 [NoCoverage] ConditionalExpression => false
+L264:32 [NoCoverage] EqualityOperator => code !== "NotFoundException"
+L264:41 [NoCoverage] StringLiteral => ""
+L264:62 [NoCoverage] BlockStatement => {}
+L265:37 [NoCoverage] StringLiteral => ``
+L265:66 [NoCoverage] ObjectLiteral => {}
+L268:7 [NoCoverage] ConditionalExpression => true
+L268:7 [NoCoverage] ConditionalExpression => false
+L268:7 [NoCoverage] LogicalOperator => (code === "AuthorizationError" || code === "AuthorizationErrorException") && code === "Acc
+L268:7 [NoCoverage] ConditionalExpression => false
+L268:7 [NoCoverage] LogicalOperator => code === "AuthorizationError" && code === "AuthorizationErrorException"
+L268:7 [NoCoverage] ConditionalExpression => false
+L268:7 [NoCoverage] EqualityOperator => code !== "AuthorizationError"
+L268:16 [NoCoverage] StringLiteral => ""
+L269:7 [NoCoverage] ConditionalExpression => false
+L269:7 [NoCoverage] EqualityOperator => code !== "AuthorizationErrorException"
+L269:16 [NoCoverage] StringLiteral => ""
+L270:7 [NoCoverage] ConditionalExpression => false
+L270:7 [NoCoverage] EqualityOperator => code !== "AccessDenied"
+L270:16 [NoCoverage] StringLiteral => ""
+L271:7 [NoCoverage] BlockStatement => {}
+L272:30 [NoCoverage] StringLiteral => ``
+L272:67 [NoCoverage] ObjectLiteral => {}
+L274:47 [NoCoverage] ObjectLiteral => {}
+L288:54 [NoCoverage] BlockStatement => {}
+L289:7 [NoCoverage] ConditionalExpression => true
+L289:7 [NoCoverage] ConditionalExpression => false
+L289:7 [NoCoverage] LogicalOperator => typeof err !== "object" && err === null
+L289:7 [NoCoverage] ConditionalExpression => false
+L289:7 [NoCoverage] EqualityOperator => typeof err === "object"
+L289:22 [NoCoverage] StringLiteral => ""
+L289:34 [NoCoverage] ConditionalExpression => false
+L289:34 [NoCoverage] EqualityOperator => err !== null
+L289:48 [NoCoverage] BlockStatement => {}
+L293:7 [NoCoverage] ConditionalExpression => true
+L293:7 [NoCoverage] ConditionalExpression => false
+L293:7 [NoCoverage] EqualityOperator => typeof name !== "string"
+L293:23 [NoCoverage] StringLiteral => ""
+L293:33 [NoCoverage] BlockStatement => {}
+L299:7 [NoCoverage] ConditionalExpression => true
+L299:7 [NoCoverage] ConditionalExpression => false
+L299:7 [NoCoverage] EqualityOperator => typeof upperCode !== "string"
+L299:28 [NoCoverage] StringLiteral => ""
+L299:38 [NoCoverage] BlockStatement => {}
+L303:10 [NoCoverage] ConditionalExpression => true
+L303:10 [NoCoverage] ConditionalExpression => false
+L303:10 [NoCoverage] EqualityOperator => typeof code !== "string"
+L303:26 [NoCoverage] StringLiteral => ""
+L306:45 [NoCoverage] BlockStatement => {}
+L307:7 [NoCoverage] ConditionalExpression => true
+L307:7 [NoCoverage] ConditionalExpression => false
+L307:29 [NoCoverage] BlockStatement => {}
+
+## src/pubsub/azureEventgrid.ts  (survived=28, nocov=3)
+L20:18 [Survived] StringLiteral => ""
+L77:9 [Survived] ConditionalExpression => true
+L82:66 [Survived] StringLiteral => ""
+L107:66 [Survived] StringLiteral => ""
+L108:21 [NoCoverage] BlockStatement => {}
+L121:9 [Survived] ConditionalExpression => false
+L121:36 [Survived] BlockStatement => {}
+L124:9 [Survived] ConditionalExpression => true
+L144:33 [Survived] ConditionalExpression => true
+L148:31 [Survived] ConditionalExpression => true
+L199:19 [NoCoverage] BlockStatement => {}
+L219:37 [Survived] StringLiteral => ``
+L219:66 [Survived] ObjectLiteral => {}
+L221:9 [Survived] ConditionalExpression => false
+L221:25 [Survived] BlockStatement => {}
+L222:30 [Survived] StringLiteral => ``
+L222:67 [Survived] ObjectLiteral => {}
+L224:48 [Survived] ObjectLiteral => {}
+L229:48 [NoCoverage] BlockStatement => {}
+L229:7 [Survived] ConditionalExpression => false
+L229:7 [Survived] LogicalOperator => typeof err !== "object" && err === null
+L229:7 [Survived] ConditionalExpression => false
+L229:34 [Survived] ConditionalExpression => false
+L233:10 [Survived] ConditionalExpression => true
+L236:45 [Survived] BlockStatement => {}
+L237:7 [Survived] ConditionalExpression => true
+L237:7 [Survived] ConditionalExpression => false
+L237:29 [Survived] BlockStatement => {}
+L245:7 [Survived] ConditionalExpression => true
+L245:7 [Survived] LogicalOperator => closable || typeof closable.close === "function"
+L245:19 [Survived] ConditionalExpression => true

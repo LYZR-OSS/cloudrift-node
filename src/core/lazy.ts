@@ -34,7 +34,7 @@ const MODULE_NOT_FOUND_CODES = new Set([
   "ERR_PACKAGE_PATH_NOT_EXPORTED",
 ]);
 
-function isModuleNotFound(err: unknown, pkg: string): boolean {
+export function isModuleNotFound(err: unknown, pkg: string): boolean {
   if (typeof err !== "object" || err === null) {
     return false;
   }

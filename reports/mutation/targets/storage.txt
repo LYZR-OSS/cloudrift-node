@@ -1,0 +1,208 @@
+# Surviving/NoCoverage mutants for storage wave
+
+
+## src/storage/s3.ts  (survived=72, nocov=18)
+L16:18 [Survived] StringLiteral => ""
+L122:25 [Survived] LogicalOperator => opts.maxPoolConnections && DEFAULT_MAX_POOL
+L123:21 [Survived] LogicalOperator => opts.connectTimeout && DEFAULT_CONNECT_TIMEOUT
+L124:18 [Survived] LogicalOperator => opts.readTimeout && DEFAULT_READ_TIMEOUT
+L159:53 [Survived] ObjectLiteral => {}
+L159:63 [Survived] LogicalOperator => opts.region && DEFAULT_REGION
+L165:17 [Survived] LogicalOperator => opts.region && DEFAULT_REGION
+L198:23 [Survived] ObjectLiteral => {}
+L199:28 [Survived] ArithmeticOperator => this.config.connectTimeout / 1000
+L200:25 [Survived] ArithmeticOperator => this.config.readTimeout / 1000
+L201:21 [Survived] ObjectLiteral => {}
+L204:9 [Survived] ConditionalExpression => true
+L211:16 [Survived] ConditionalExpression => true
+L224:9 [Survived] ConditionalExpression => true
+L232:48 [NoCoverage] BlockStatement => {}
+L245:65 [NoCoverage] BooleanLiteral => true
+L257:73 [Survived] BooleanLiteral => false
+L261:73 [Survived] BooleanLiteral => false
+L265:9 [Survived] ConditionalExpression => true
+L309:19 [NoCoverage] BlockStatement => {}
+L317:51 [Survived] ObjectLiteral => {}
+L320:11 [Survived] ConditionalExpression => true
+L327:23 [NoCoverage] StringLiteral => "Stryker was here!"
+L340:44 [NoCoverage] ArrayDeclaration => ["Stryker was here"]
+L348:19 [NoCoverage] BlockStatement => {}
+L353:28 [NoCoverage] StringLiteral => "Stryker was here!"
+L369:42 [NoCoverage] ArrayDeclaration => ["Stryker was here"]
+L370:13 [Survived] ConditionalExpression => true
+L387:19 [NoCoverage] BlockStatement => {}
+L403:19 [NoCoverage] BlockStatement => {}
+L422:19 [NoCoverage] BlockStatement => {}
+L447:37 [Survived] StringLiteral => ``
+L450:40 [Survived] StringLiteral => ``
+L450:73 [Survived] ObjectLiteral => {}
+L452:47 [Survived] ObjectLiteral => {}
+L456:54 [Survived] BlockStatement => {}
+L457:48 [NoCoverage] BlockStatement => {}
+L457:7 [Survived] ConditionalExpression => true
+L457:7 [Survived] ConditionalExpression => false
+L457:7 [Survived] LogicalOperator => typeof exc !== "object" && exc === null
+L457:7 [Survived] ConditionalExpression => false
+L457:7 [Survived] EqualityOperator => typeof exc === "object"
+L457:22 [Survived] StringLiteral => ""
+L457:34 [Survived] ConditionalExpression => false
+L457:34 [Survived] EqualityOperator => exc !== null
+L465:7 [Survived] ConditionalExpression => true
+L465:7 [Survived] ConditionalExpression => false
+L465:7 [Survived] EqualityOperator => typeof e.name !== "string"
+L465:25 [Survived] StringLiteral => ""
+L465:35 [Survived] BlockStatement => {}
+L468:7 [NoCoverage] ConditionalExpression => true
+L468:7 [NoCoverage] ConditionalExpression => false
+L468:7 [NoCoverage] EqualityOperator => typeof e.Code !== "string"
+L468:25 [NoCoverage] StringLiteral => ""
+L468:35 [NoCoverage] BlockStatement => {}
+L474:55 [Survived] BlockStatement => {}
+L475:48 [NoCoverage] BlockStatement => {}
+L475:7 [Survived] ConditionalExpression => true
+L475:7 [Survived] ConditionalExpression => false
+L475:7 [Survived] LogicalOperator => typeof exc !== "object" && exc === null
+L475:7 [Survived] ConditionalExpression => false
+L475:7 [Survived] EqualityOperator => typeof exc === "object"
+L475:22 [Survived] StringLiteral => ""
+L475:34 [Survived] ConditionalExpression => false
+L475:34 [Survived] EqualityOperator => exc !== null
+L480:10 [Survived] ConditionalExpression => true
+L480:10 [Survived] ConditionalExpression => false
+L480:10 [Survived] EqualityOperator => typeof status !== "number"
+L480:28 [Survived] StringLiteral => ""
+L485:10 [Survived] LogicalOperator => (code === "404" || code === "NoSuchKey" || code === "NotFound") && statusCode(exc) === 404
+L485:10 [Survived] ConditionalExpression => false
+L485:10 [Survived] LogicalOperator => (code === "404" || code === "NoSuchKey") && code === "NotFound"
+L485:10 [Survived] ConditionalExpression => false
+L485:10 [Survived] LogicalOperator => code === "404" && code === "NoSuchKey"
+L485:10 [Survived] ConditionalExpression => false
+L485:19 [Survived] StringLiteral => ""
+L485:28 [Survived] ConditionalExpression => false
+L485:37 [Survived] StringLiteral => ""
+L485:52 [Survived] ConditionalExpression => false
+L485:61 [Survived] StringLiteral => ""
+L485:75 [Survived] ConditionalExpression => false
+L490:10 [Survived] LogicalOperator => (code === "403" || code === "AccessDenied") && statusCode(exc) === 403
+L490:10 [Survived] ConditionalExpression => false
+L490:10 [Survived] LogicalOperator => code === "403" && code === "AccessDenied"
+L490:10 [Survived] ConditionalExpression => false
+L490:19 [Survived] StringLiteral => ""
+L490:28 [Survived] ConditionalExpression => false
+L490:37 [Survived] StringLiteral => ""
+L490:55 [Survived] ConditionalExpression => false
+L494:7 [Survived] ConditionalExpression => true
+
+## src/storage/azureBlob.ts  (survived=71, nocov=41)
+L21:18 [Survived] StringLiteral => ""
+L115:68 [Survived] StringLiteral => ""
+L117:46 [Survived] LogicalOperator => accountKey && undefined
+L138:17 [Survived] MethodExpression => opts.sasToken.endsWith("?")
+L138:42 [Survived] StringLiteral => ""
+L138:65 [Survived] StringLiteral => ``
+L152:39 [NoCoverage] ObjectLiteral => {}
+L178:45 [NoCoverage] BlockStatement => {}
+L179:45 [NoCoverage] BooleanLiteral => true
+L182:32 [NoCoverage] BlockStatement => {}
+L183:9 [NoCoverage] ConditionalExpression => true
+L183:9 [NoCoverage] ConditionalExpression => false
+L183:30 [NoCoverage] BlockStatement => {}
+L186:9 [NoCoverage] ConditionalExpression => true
+L186:9 [NoCoverage] ConditionalExpression => false
+L186:9 [NoCoverage] OptionalChaining => this._credential.close
+L186:34 [NoCoverage] BlockStatement => {}
+L191:48 [NoCoverage] BlockStatement => {}
+L203:72 [NoCoverage] BooleanLiteral => true
+L215:57 [Survived] BooleanLiteral => false
+L224:57 [Survived] BooleanLiteral => false
+L233:57 [Survived] BooleanLiteral => false
+L242:57 [Survived] BooleanLiteral => false
+L253:57 [Survived] BooleanLiteral => false
+L282:18 [NoCoverage] BlockStatement => {}
+L282:11 [Survived] ConditionalExpression => false
+L298:19 [NoCoverage] BlockStatement => {}
+L310:23 [NoCoverage] StringLiteral => "Stryker was here!"
+L318:19 [NoCoverage] BlockStatement => {}
+L323:28 [NoCoverage] StringLiteral => "Stryker was here!"
+L327:47 [Survived] ObjectLiteral => {}
+L328:19 [NoCoverage] BlockStatement => {}
+L336:21 [NoCoverage] BlockStatement => {}
+L350:9 [Survived] StringLiteral => ""
+L351:11 [Survived] StringLiteral => ""
+L362:55 [Survived] StringLiteral => ""
+L363:33 [Survived] ArithmeticOperator => Date.now() - expiresIn * 1000
+L363:46 [Survived] ArithmeticOperator => expiresIn / 1000
+L369:9 [Survived] StringLiteral => ``
+L372:19 [NoCoverage] BlockStatement => {}
+L384:19 [NoCoverage] BlockStatement => {}
+L398:19 [Survived] LogicalOperator => props.metadata && {}
+L400:19 [NoCoverage] BlockStatement => {}
+L415:23 [NoCoverage] ObjectLiteral => {}
+L415:42 [NoCoverage] ObjectLiteral => {}
+L417:19 [NoCoverage] BlockStatement => {}
+L423:32 [NoCoverage] BlockStatement => {}
+L424:9 [NoCoverage] ConditionalExpression => true
+L424:9 [NoCoverage] ConditionalExpression => false
+L424:26 [NoCoverage] BlockStatement => {}
+L431:9 [Survived] LogicalOperator => status === 404 && errorCode(exc) === "BlobNotFound"
+L431:9 [Survived] ConditionalExpression => false
+L431:27 [Survived] ConditionalExpression => false
+L431:46 [Survived] StringLiteral => ""
+L432:37 [Survived] StringLiteral => ``
+L432:65 [Survived] ObjectLiteral => {}
+L434:9 [Survived] ConditionalExpression => true
+L435:40 [Survived] StringLiteral => ``
+L435:73 [Survived] ObjectLiteral => {}
+L437:47 [Survived] ObjectLiteral => {}
+L446:33 [NoCoverage] BlockStatement => {}
+L446:7 [Survived] ConditionalExpression => true
+L446:7 [Survived] ConditionalExpression => false
+L446:7 [Survived] EqualityOperator => typeof data !== "string"
+L446:23 [Survived] StringLiteral => ""
+L453:48 [NoCoverage] BlockStatement => {}
+L453:7 [Survived] ConditionalExpression => false
+L453:7 [Survived] LogicalOperator => typeof exc !== "object" && exc === null
+L453:7 [Survived] ConditionalExpression => false
+L453:34 [Survived] ConditionalExpression => false
+L457:10 [Survived] ConditionalExpression => true
+L460:54 [Survived] BlockStatement => {}
+L461:48 [NoCoverage] BlockStatement => {}
+L461:7 [Survived] ConditionalExpression => true
+L461:7 [Survived] ConditionalExpression => false
+L461:7 [Survived] LogicalOperator => typeof exc !== "object" && exc === null
+L461:7 [Survived] ConditionalExpression => false
+L461:7 [Survived] EqualityOperator => typeof exc === "object"
+L461:22 [Survived] StringLiteral => ""
+L461:34 [Survived] ConditionalExpression => false
+L461:34 [Survived] EqualityOperator => exc !== null
+L465:33 [NoCoverage] BlockStatement => {}
+L465:7 [Survived] ConditionalExpression => true
+L465:7 [Survived] ConditionalExpression => false
+L465:7 [Survived] EqualityOperator => typeof code !== "string"
+L465:23 [Survived] StringLiteral => ""
+L469:18 [NoCoverage] ConditionalExpression => true
+L469:18 [NoCoverage] EqualityOperator => typeof details.errorCode !== "string"
+L469:47 [NoCoverage] StringLiteral => ""
+L469:57 [NoCoverage] BlockStatement => {}
+L469:7 [Survived] ConditionalExpression => false
+L475:45 [Survived] BlockStatement => {}
+L476:7 [Survived] ConditionalExpression => true
+L476:7 [Survived] ConditionalExpression => false
+L476:29 [Survived] BlockStatement => {}
+L482:81 [Survived] BlockStatement => {}
+L483:39 [Survived] StringLiteral => ""
+L483:45 [Survived] BlockStatement => {}
+L484:9 [Survived] ConditionalExpression => true
+L484:9 [Survived] ConditionalExpression => false
+L484:9 [Survived] MethodExpression => part.endsWith(`${field}=`)
+L484:25 [Survived] StringLiteral => ``
+L484:39 [Survived] BlockStatement => {}
+L485:14 [Survived] MethodExpression => part
+L485:25 [Survived] ArithmeticOperator => field.length - 1
+L491:57 [Survived] BlockStatement => {}
+L492:7 [Survived] BlockStatement => {}
+L494:34 [NoCoverage] StringLiteral => "Stryker was here!"
+L494:12 [Survived] LogicalOperator => host.split(".")[0] && ""
+L494:23 [Survived] StringLiteral => ""
+L495:11 [NoCoverage] BlockStatement => {}
+L496:12 [NoCoverage] StringLiteral => "Stryker was here!"

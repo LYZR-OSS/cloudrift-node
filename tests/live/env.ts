@@ -23,6 +23,17 @@
  *   CLOUDRIFT_LIVE_AWS_BUCKET              optional pre-provisioned S3 bucket
  *   CLOUDRIFT_LIVE_AWS_QUEUE_URL           optional pre-provisioned SQS queue URL
  *   CLOUDRIFT_LIVE_AWS_TOPIC_ARN           optional pre-provisioned SNS topic ARN
+ *   CLOUDRIFT_LIVE_AWS_SERVICES            optional per-service allowlist. When
+ *                                          UNSET/empty, ALL AWS services run
+ *                                          (default — unchanged behavior). When
+ *                                          set, only the listed services run and
+ *                                          the rest SKIP — useful for accounts
+ *                                          whose IAM credentials cover only a
+ *                                          subset of services. Comma/space-
+ *                                          separated, case-insensitive. Accepted
+ *                                          tokens: "s3", "sqs", "sns", "secrets"
+ *                                          (Secrets Manager). Example:
+ *                                          CLOUDRIFT_LIVE_AWS_SERVICES="s3,sqs"
  *
  * Azure:
  *   CLOUDRIFT_LIVE_AZURE_STORAGE_CONNECTION_STRING   blob storage
@@ -66,6 +77,31 @@ export function requireEnv(names: string[]): boolean {
     return false;
   }
   return names.every((name) => env(name) !== undefined);
+}
+
+/**
+ * Per-service AWS gating selector (does NOT check LIVE or auth — callers
+ * combine it with their auth gate).
+ *
+ * Reads the optional allowlist env var `CLOUDRIFT_LIVE_AWS_SERVICES`
+ * (comma/space-separated, case-insensitive). Canonical service tokens are
+ * "s3", "sqs", "sns", and "secrets" (AWS Secrets Manager).
+ *
+ *   - Unset/empty  -> every service is enabled (default, unchanged behavior).
+ *   - Set          -> only the listed services are enabled; others are skipped.
+ */
+export function awsServiceEnabled(service: string): boolean {
+  const allowlist = env("CLOUDRIFT_LIVE_AWS_SERVICES");
+  if (allowlist === undefined) {
+    return true;
+  }
+  const enabled = new Set(
+    allowlist
+      .split(/[\s,]+/)
+      .map((token) => token.trim().toLowerCase())
+      .filter((token) => token !== ""),
+  );
+  return enabled.has(service.trim().toLowerCase());
 }
 
 /**

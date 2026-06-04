@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
 
 import { BaseRedisBackend } from "../src/cache/redisBase.js";
+import type { RedisClientLike } from "../src/cache/redisBase.js";
 import { getCache } from "../src/cache/index.js";
 import { StandaloneRedisBackend } from "../src/cache/redisStandalone.js";
 import { generateElastiCacheIamToken } from "../src/cache/redisElasticache.js";
@@ -18,6 +19,20 @@ class TestRedisBackend extends BaseRedisBackend {
 
 function makeCache(): TestRedisBackend {
   return TestRedisBackend.withMock();
+}
+
+/**
+ * Subclass that accepts an arbitrary injected client, so a test can supply a
+ * stub whose responses (e.g. `ping` reply) differ from the ioredis-mock
+ * defaults. Used to exercise BaseRedisBackend branches the mock can't reach.
+ */
+class InjectableRedisBackend extends BaseRedisBackend {
+  static withClient(client: RedisClientLike): InjectableRedisBackend {
+    return new InjectableRedisBackend(client);
+  }
+  get rawClient(): RedisClientLike {
+    return this.client;
+  }
 }
 
 describe("BaseRedisBackend ops", () => {
@@ -234,6 +249,95 @@ describe("BaseRedisBackend ops", () => {
     expect(t).toBeLessThanOrEqual(50);
     await cache.pipeline().delete("pt").exec();
     expect(await cache.get("pt")).toBeNull();
+  });
+});
+
+describe("BaseRedisBackend branch coverage", () => {
+  // redisBase.ts:297 `return reply === "PONG"` — the false branch.
+  it("ping returns false when the server reply is not PONG", async () => {
+    const client = {
+      ping: vi.fn().mockResolvedValue("NOPE"),
+    } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    expect(await cache.ping()).toBe(false);
+    expect(client.ping).toHaveBeenCalledTimes(1);
+  });
+
+  it("ping returns true when the server reply is PONG", async () => {
+    const client = {
+      ping: vi.fn().mockResolvedValue("PONG"),
+    } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    expect(await cache.ping()).toBe(true);
+  });
+
+  // redisBase.ts:142 `if (ttl !== undefined && ttl !== null)` — distinguish the
+  // with-ttl path (EX arg passed) from the without-ttl path (no expiry arg).
+  it("set WITH ttl passes the EX expiry argument to the client", async () => {
+    const setSpy = vi.fn().mockResolvedValue("OK");
+    const client = { set: setSpy } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    await cache.set("k", "v", 60);
+    expect(setSpy).toHaveBeenCalledWith("k", "v", "EX", 60);
+  });
+
+  it("set WITHOUT ttl omits the EX expiry argument", async () => {
+    const setSpy = vi.fn().mockResolvedValue("OK");
+    const client = { set: setSpy } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    await cache.set("k", "v");
+    expect(setSpy).toHaveBeenCalledWith("k", "v");
+    expect(setSpy.mock.calls[0]).toHaveLength(2);
+  });
+
+  // Observable end-to-end distinction over ioredis-mock: with ttl -> positive
+  // remaining; without ttl -> -1 (no expiry).
+  it("set with ttl yields a positive ttl, without ttl yields -1", async () => {
+    const cache = makeCache();
+    await cache.set("with_ttl", "v", 45);
+    const withTtl = await cache.ttl("with_ttl");
+    expect(withTtl).toBeGreaterThan(0);
+    expect(withTtl).toBeLessThanOrEqual(45);
+    await cache.set("no_ttl", "v");
+    expect(await cache.ttl("no_ttl")).toBe(-1);
+    await cache.flush();
+    await cache.close();
+  });
+
+  // redisBase.ts pipeline:87 `if (ttl !== undefined && ttl !== null)`.
+  it("pipeline set WITH ttl passes EX, WITHOUT ttl omits it", async () => {
+    const setSpy = vi.fn().mockReturnThis();
+    const multi = {
+      set: setSpy,
+      getBuffer: vi.fn().mockReturnThis(),
+      del: vi.fn().mockReturnThis(),
+      incr: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue([]),
+    };
+    const client = { multi: () => multi } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    await cache.pipeline().set("a", "1", 30).set("b", "2").exec();
+    expect(setSpy).toHaveBeenNthCalledWith(1, "a", "1", "EX", 30);
+    expect(setSpy).toHaveBeenNthCalledWith(2, "b", "2");
+    expect(setSpy.mock.calls[1]).toHaveLength(2);
+  });
+
+  // redisBase.ts:221 `if (fields.length === 0)` — hdel early-return guard.
+  it("hdel with no fields returns 0 without calling the client", async () => {
+    const hdelSpy = vi.fn();
+    const client = { hdel: hdelSpy } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    expect(await cache.hdel("h")).toBe(0);
+    expect(hdelSpy).not.toHaveBeenCalled();
+  });
+
+  // redisBase.ts:154 `if (keys.length === 0)` — delete early-return guard.
+  it("delete with no keys returns 0 without calling the client", async () => {
+    const delSpy = vi.fn();
+    const client = { del: delSpy } as unknown as RedisClientLike;
+    const cache = InjectableRedisBackend.withClient(client);
+    expect(await cache.delete()).toBe(0);
+    expect(delSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DocumentConnectionError } from "../src/core/errors.js";
+import { CloudRiftError, DocumentConnectionError } from "../src/core/errors.js";
 import {
   getMongodb,
   setCosmosClientConstructor,
@@ -266,5 +266,122 @@ describe("dispatch + errors", () => {
     await expect(getMongodb("cosmos", { account: "a", accountKey: "k" })).rejects.toThrow(
       /Failed to connect to Cosmos DB/,
     );
+  });
+});
+
+describe("connect error re-wrap guard", () => {
+  it("documentdb passes through an already-CloudRiftError without re-wrapping (documentdb.ts:90)", async () => {
+    const original = new CloudRiftError("install mongodb to use the documentdb provider");
+    setDocumentDbClientConstructor(
+      class {
+        constructor() {
+          throw original;
+        }
+      } as never,
+    );
+    await expect(getMongodb("documentdb", { uri: "mongodb://h/" })).rejects.toBe(original);
+  });
+
+  it("documentdb wraps a plain Error in DocumentConnectionError (documentdb.ts:90)", async () => {
+    setDocumentDbClientConstructor(
+      class {
+        constructor() {
+          throw new Error("boom");
+        }
+      } as never,
+    );
+    const promise = getMongodb("documentdb", { uri: "mongodb://h/" });
+    await expect(promise).rejects.toBeInstanceOf(DocumentConnectionError);
+    await expect(getMongodb("documentdb", { uri: "mongodb://h/" })).rejects.toThrow(
+      /Failed to connect to DocumentDB: Error: boom/,
+    );
+  });
+
+  it("cosmos passes through an already-CloudRiftError without re-wrapping (cosmos.ts:61)", async () => {
+    const original = new CloudRiftError("install mongodb to use the cosmos provider");
+    setCosmosClientConstructor(
+      class {
+        constructor() {
+          throw original;
+        }
+      } as never,
+    );
+    await expect(getMongodb("cosmos", { account: "a", accountKey: "k" })).rejects.toBe(original);
+  });
+
+  it("cosmos wraps a plain Error in DocumentConnectionError (cosmos.ts:61)", async () => {
+    setCosmosClientConstructor(
+      class {
+        constructor() {
+          throw new Error("boom");
+        }
+      } as never,
+    );
+    await expect(getMongodb("cosmos", { account: "a", accountKey: "k" })).rejects.toBeInstanceOf(
+      DocumentConnectionError,
+    );
+    await expect(getMongodb("cosmos", { account: "a", accountKey: "k" })).rejects.toThrow(
+      /Failed to connect to Cosmos DB: Error: boom/,
+    );
+  });
+});
+
+describe("cosmos default appName (cosmos.ts:91)", () => {
+  it("uses the @account@ default appName when none is provided", async () => {
+    await getMongodb("cosmos", { account: "acct", accountKey: "k" });
+    // quotePlus("@acct@") => %40acct%40
+    expect(last().uri).toContain("appName=%40acct%40");
+  });
+
+  it("uses the explicit appName when provided", async () => {
+    await getMongodb("cosmos", { account: "acct", accountKey: "k", appName: "myApp" });
+    const uri = last().uri;
+    expect(uri).toContain("appName=myApp");
+    expect(uri).not.toContain("appName=%40acct%40");
+  });
+});
+
+describe("documentdb tlsCaFile branch (documentdb.ts:107/132/156)", () => {
+  it("connectUri sets tlsCAFile when tlsCaFile provided, omits it otherwise", async () => {
+    await getMongodb("documentdb", { uri: "mongodb://h/", tlsCaFile: "/etc/ssl/ca.pem" });
+    expect(last().options.tlsCAFile).toBe("/etc/ssl/ca.pem");
+
+    await getMongodb("documentdb", { uri: "mongodb://h/" });
+    expect("tlsCAFile" in last().options).toBe(false);
+  });
+
+  it("connectCredentials sets tlsCAFile when tlsCaFile provided, omits it otherwise", async () => {
+    await getMongodb("documentdb", {
+      host: "h",
+      port: 27017,
+      username: "u",
+      password: "p",
+      tlsCaFile: "/secrets/ca.pem",
+    });
+    expect(last().options.tlsCAFile).toBe("/secrets/ca.pem");
+
+    await getMongodb("documentdb", { host: "h", port: 27017, username: "u", password: "p" });
+    expect("tlsCAFile" in last().options).toBe(false);
+  });
+
+  it("connectTlsCert sets tlsCAFile when tlsCaFile provided, omits it otherwise", async () => {
+    await getMongodb("documentdb", {
+      host: "h",
+      port: 27017,
+      username: "u",
+      password: "p",
+      tlsCertKeyFile: "/secrets/client.pem",
+      tlsCaFile: "/secrets/ca.pem",
+    });
+    expect(last().options.tlsCAFile).toBe("/secrets/ca.pem");
+
+    await getMongodb("documentdb", {
+      host: "h",
+      port: 27017,
+      username: "u",
+      password: "p",
+      tlsCertKeyFile: "/secrets/client.pem",
+    });
+    expect("tlsCAFile" in last().options).toBe(false);
   });
 });

@@ -16,5 +16,12 @@ export default defineConfig({
     include: ["tests/live/**/*.test.ts"],
     testTimeout: 60_000,
     hookTimeout: 120_000,
+    // Real cloud services are eventually consistent: a freshly-sent SQS message
+    // may not appear within the first long-poll, and Secrets Manager
+    // ListSecrets lags a just-created secret. These live tests are idempotent
+    // round-trips, so retrying absorbs that transient consistency lag instead
+    // of failing. This is harmless for the unit lane — it uses a different
+    // config file, so only the live config retries.
+    retry: 2,
   },
 });

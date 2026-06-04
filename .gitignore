@@ -1,3 +1,8 @@
 node_modules/
 dist/
 coverage/
+reports/mutation/mutation.json
+reports/mutation/mutation.html
+reports/mutation/events/
+reports/stryker-incremental.json
+.stryker-tmp/

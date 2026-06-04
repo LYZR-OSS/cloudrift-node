@@ -1,0 +1,41 @@
+# Surviving/NoCoverage mutants for cachecore wave
+
+
+## src/cache/redisElasticache.ts  (survived=18, nocov=19)
+L34:58 [Survived] StringLiteral => ""
+L44:13 [Survived] BooleanLiteral => true
+L51:11 [Survived] BooleanLiteral => false
+L60:39 [NoCoverage] BlockStatement => {}
+L89:5 [Survived] StringLiteral => ""
+L93:5 [Survived] StringLiteral => ""
+L97:14 [Survived] StringLiteral => ""
+L106:13 [Survived] StringLiteral => ""
+L107:15 [Survived] StringLiteral => ""
+L110:11 [Survived] StringLiteral => ""
+L115:14 [Survived] ObjectLiteral => {}
+L116:13 [Survived] StringLiteral => ``
+L128:47 [NoCoverage] StringLiteral => ""
+L128:60 [NoCoverage] StringLiteral => "Stryker was here!"
+L131:11 [Survived] StringLiteral => ""
+L147:7 [Survived] ConditionalExpression => true
+L147:7 [Survived] LogicalOperator => opts.awsAccessKeyId || opts.awsSecretAccessKey
+L151:34 [NoCoverage] ObjectLiteral => {}
+L155:5 [NoCoverage] StringLiteral => ""
+L156:5 [NoCoverage] StringLiteral => ""
+L158:7 [NoCoverage] ConditionalExpression => true
+L158:7 [NoCoverage] ConditionalExpression => false
+L158:25 [NoCoverage] BlockStatement => {}
+L159:30 [NoCoverage] ObjectLiteral => {}
+L187:11 [Survived] ConditionalExpression => true
+L193:17 [NoCoverage] BlockStatement => {}
+L194:38 [NoCoverage] StringLiteral => ``
+L194:90 [NoCoverage] ObjectLiteral => {}
+L253:32 [Survived] ObjectLiteral => {}
+L258:17 [NoCoverage] BlockStatement => {}
+L259:38 [NoCoverage] StringLiteral => ``
+L259:96 [NoCoverage] ObjectLiteral => {}
+L284:13 [Survived] LogicalOperator => opts.db && 0
+L292:11 [Survived] ConditionalExpression => true
+L295:17 [NoCoverage] BlockStatement => {}
+L296:38 [NoCoverage] StringLiteral => ``
+L296:97 [NoCoverage] ObjectLiteral => {}

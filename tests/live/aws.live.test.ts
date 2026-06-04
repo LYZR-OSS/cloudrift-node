@@ -21,7 +21,7 @@ import { SQSClient, CreateQueueCommand, DeleteQueueCommand } from "@aws-sdk/clie
 import { SNSClient, CreateTopicCommand, DeleteTopicCommand } from "@aws-sdk/client-sns";
 
 import { getStorage, getQueue, getPubsub, getSecrets } from "../../src/index.js";
-import { env, requireEnv, uniqueName } from "./env.js";
+import { awsServiceEnabled, env, requireEnv, uniqueName } from "./env.js";
 
 /* ------------------------------------------------------------------ */
 /* Shared AWS auth resolution                                          */
@@ -72,11 +72,22 @@ const AWS_AUTH_PRESENT =
     "CLOUDRIFT_LIVE_AWS_SECRET_ACCESS_KEY",
   ]) || requireEnv(["CLOUDRIFT_LIVE_AWS_REGION", "CLOUDRIFT_LIVE_AWS_PROFILE"]);
 
+/**
+ * Per-service gates: a service runs only when auth is present AND it is enabled
+ * by the optional CLOUDRIFT_LIVE_AWS_SERVICES allowlist (default = all enabled).
+ * This lets partial-permission accounts SKIP services they cannot access
+ * instead of FAILING at runtime.
+ */
+const S3_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("s3");
+const SQS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("sqs");
+const SNS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("sns");
+const SECRETS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("secrets");
+
 /* ================================================================== */
 /* S3                                                                 */
 /* ================================================================== */
 
-describe.skipIf(!AWS_AUTH_PRESENT)("AWS S3 live lifecycle", () => {
+describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
   const PREFIX = `${uniqueName("s3")}/`;
   const key = `${PREFIX}hello.txt`;
   const payload = Buffer.from("cloudrift-live-s3-payload", "utf8");
@@ -163,7 +174,7 @@ describe.skipIf(!AWS_AUTH_PRESENT)("AWS S3 live lifecycle", () => {
 /* SQS                                                                */
 /* ================================================================== */
 
-describe.skipIf(!AWS_AUTH_PRESENT)("AWS SQS live lifecycle", () => {
+describe.skipIf(!SQS_PRESENT)("AWS SQS live lifecycle", () => {
   let queueUrl: string;
   let createdQueue = false;
   let rawClient: SQSClient | undefined;
@@ -222,7 +233,7 @@ describe.skipIf(!AWS_AUTH_PRESENT)("AWS SQS live lifecycle", () => {
 /* SNS                                                                */
 /* ================================================================== */
 
-describe.skipIf(!AWS_AUTH_PRESENT)("AWS SNS live lifecycle", () => {
+describe.skipIf(!SNS_PRESENT)("AWS SNS live lifecycle", () => {
   let topicArn: string;
   let createdTopic = false;
   let rawClient: SNSClient | undefined;
@@ -276,7 +287,7 @@ describe.skipIf(!AWS_AUTH_PRESENT)("AWS SNS live lifecycle", () => {
 /* Secrets Manager                                                    */
 /* ================================================================== */
 
-describe.skipIf(!AWS_AUTH_PRESENT)("AWS Secrets Manager live lifecycle", () => {
+describe.skipIf(!SECRETS_PRESENT)("AWS Secrets Manager live lifecycle", () => {
   const PREFIX = uniqueName("secret");
   const name = PREFIX;
   let backend: Awaited<ReturnType<typeof getSecrets>> | undefined;
