@@ -202,8 +202,15 @@ export class AzureEventGridBackend extends PubSubBackend {
   }
 
   override async healthCheck(): Promise<boolean> {
-    // Event Grid doesn't have a lightweight ping; best-effort check.
-    return true;
+    // Event Grid has no lightweight ping. At least verify optional SDK loading
+    // and client/credential construction; publish() remains the real liveness
+    // proof because Event Grid validates endpoint/auth on send.
+    try {
+      await this.ensure();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private translate(err: unknown, topic: string): Error {

@@ -380,6 +380,31 @@ describe("AzureEventGridBackend (fake)", () => {
     await backend.close();
   });
 
+  it("healthCheck validates lazy client initialization", async () => {
+    const backend = AzureEventGridBackend.fromAccessKey({
+      endpoint: "https://topic",
+      accessKey: "key",
+    });
+
+    await expect(backend.healthCheck()).resolves.toBe(true);
+    expect(eventGridHarness.clients).toHaveLength(1);
+    await backend.close();
+  });
+
+  it("healthCheck returns false when lazy client initialization fails", async () => {
+    eventGridHarness.failNextClientCreations = 1;
+    const backend = AzureEventGridBackend.fromManagedIdentity({
+      endpoint: "https://topic",
+      clientId: "managed-client",
+    });
+
+    await expect(backend.healthCheck()).resolves.toBe(false);
+    expect(eventGridHarness.clients).toHaveLength(0);
+    expect(eventGridHarness.credentials).toHaveLength(1);
+    expect(eventGridHarness.credentials[0].closed).toBe(true);
+    await backend.close();
+  });
+
   it("retries lazy client creation after the first initialization fails", async () => {
     eventGridHarness.failNextClientCreations = 1;
     const backend = AzureEventGridBackend.fromManagedIdentity({
