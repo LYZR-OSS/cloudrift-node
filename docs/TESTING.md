@@ -187,6 +187,14 @@ CLOUDRIFT_LIVE_TESTS=1 npm run test:live
 Each provider group additionally requires its own variables (below); a group
 whose subset is incomplete skips with the gate visible in its `describe` name.
 
+### Live test logging
+
+Live tests log lifecycle events because they touch real cloud resources. The log
+lines use a `[live:<provider>]` prefix and report resource decisions, backend
+initialization, lifecycle milestones, and cleanup actions. Credential-bearing
+fields such as connection strings, tokens, secrets, passwords, access keys, and
+URIs are redacted before logging.
+
 ### Environment variables
 
 | Variable                                            | Group             | Purpose                                        |

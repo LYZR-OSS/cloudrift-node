@@ -21,7 +21,7 @@ import { SQSClient, CreateQueueCommand, DeleteQueueCommand } from "@aws-sdk/clie
 import { SNSClient, CreateTopicCommand, DeleteTopicCommand } from "@aws-sdk/client-sns";
 
 import { getStorage, getQueue, getPubsub, getSecrets } from "../../src/index.js";
-import { awsServiceEnabled, env, requireEnv, uniqueName } from "./env.js";
+import { awsServiceEnabled, env, liveLog, requireEnv, uniqueName } from "./env.js";
 
 /* ------------------------------------------------------------------ */
 /* Shared AWS auth resolution                                          */
@@ -88,6 +88,7 @@ const SECRETS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("secrets");
 /* ================================================================== */
 
 describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
+  const log = liveLog("aws:s3");
   const PREFIX = `${uniqueName("s3")}/`;
   const key = `${PREFIX}hello.txt`;
   const payload = Buffer.from("cloudrift-live-s3-payload", "utf8");
@@ -102,24 +103,30 @@ describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
     rawClient = new S3Client(awsClientConfig());
     if (provided !== undefined) {
       bucket = provided;
+      log.step("using provided bucket", { bucket, prefix: PREFIX });
     } else {
       bucket = uniqueName("bucket");
+      log.step("creating bucket", { bucket });
       await rawClient.send(new CreateBucketCommand({ Bucket: bucket }));
       createdBucket = true;
+      log.step("created bucket", { bucket });
     }
+    log.step("initializing backend", { provider: "s3", bucket });
     backend = await getStorage("s3", { ...awsAuthOptions(), bucket });
   });
 
   afterAll(async () => {
     try {
       await backend?.close();
+      log.step("closed backend", { bucket });
     } catch (err) {
-      console.warn("[live s3] backend close failed:", err);
+      log.warn("backend close failed", err, { bucket });
     }
     try {
       if (createdBucket && rawClient) {
         // Empty then delete a bucket WE created.
         let token: string | undefined;
+        let deletedObjects = 0;
         do {
           const page = await rawClient.send(
             new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }),
@@ -129,10 +136,12 @@ describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
             await rawClient.send(
               new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects } }),
             );
+            deletedObjects += objects.length;
           }
           token = page.IsTruncated ? page.NextContinuationToken : undefined;
         } while (token);
         await rawClient.send(new DeleteBucketCommand({ Bucket: bucket }));
+        log.step("deleted created bucket", { bucket, deletedObjects });
       } else if (rawClient) {
         // Env-provided bucket: only delete our prefixed keys.
         const page = await rawClient.send(
@@ -144,9 +153,14 @@ describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
             new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects } }),
           );
         }
+        log.step("cleaned provided bucket prefix", {
+          bucket,
+          prefix: PREFIX,
+          deletedObjects: objects.length,
+        });
       }
     } catch (err) {
-      console.warn("[live s3] cleanup failed:", err);
+      log.warn("cleanup failed", err, { bucket, prefix: PREFIX });
     } finally {
       rawClient?.destroy();
     }
@@ -156,17 +170,22 @@ describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
     expect(backend).toBeDefined();
     const b = backend!;
 
+    log.step("uploading object", { bucket, key });
     await b.upload(key, payload, "text/plain");
     expect(await b.exists(key)).toBe(true);
+    log.step("uploaded object", { bucket, key });
 
     const downloaded = await b.download(key);
     expect(downloaded.equals(payload)).toBe(true);
+    log.step("downloaded object", { bucket, key, bytes: downloaded.length });
 
     const listed = await b.list(PREFIX);
     expect(listed).toContain(key);
+    log.step("listed prefix", { bucket, prefix: PREFIX, count: listed.length });
 
     await b.delete(key);
     expect(await b.exists(key)).toBe(false);
+    log.step("deleted object", { bucket, key });
   });
 });
 
@@ -175,6 +194,7 @@ describe.skipIf(!S3_PRESENT)("AWS S3 live lifecycle", () => {
 /* ================================================================== */
 
 describe.skipIf(!SQS_PRESENT)("AWS SQS live lifecycle", () => {
+  const log = liveLog("aws:sqs");
   let queueUrl: string;
   let createdQueue = false;
   let rawClient: SQSClient | undefined;
@@ -184,28 +204,37 @@ describe.skipIf(!SQS_PRESENT)("AWS SQS live lifecycle", () => {
     const provided = env("CLOUDRIFT_LIVE_AWS_QUEUE_URL");
     if (provided !== undefined) {
       queueUrl = provided;
+      log.step("using provided queue", { queueUrl });
     } else {
       rawClient = new SQSClient(awsClientConfig());
-      const res = await rawClient.send(new CreateQueueCommand({ QueueName: uniqueName("queue") }));
+      const queueName = uniqueName("queue");
+      log.step("creating queue", { queueName });
+      const res = await rawClient.send(new CreateQueueCommand({ QueueName: queueName }));
       queueUrl = res.QueueUrl!;
       createdQueue = true;
+      log.step("created queue", { queueName, queueUrl });
     }
+    log.step("initializing backend", { provider: "sqs", queueUrl });
     backend = await getQueue("sqs", { ...awsAuthOptions(), queueUrl });
   });
 
   afterAll(async () => {
     try {
       await backend?.close();
+      log.step("closed backend", { queueUrl });
     } catch (err) {
-      console.warn("[live sqs] backend close failed:", err);
+      log.warn("backend close failed", err, { queueUrl });
     }
     try {
       // Never purge an env-provided queue; only delete one WE created.
       if (createdQueue && rawClient) {
         await rawClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl }));
+        log.step("deleted created queue", { queueUrl });
+      } else {
+        log.step("left provided queue intact", { queueUrl });
       }
     } catch (err) {
-      console.warn("[live sqs] cleanup failed:", err);
+      log.warn("cleanup failed", err, { queueUrl });
     } finally {
       rawClient?.destroy();
     }
@@ -216,16 +245,21 @@ describe.skipIf(!SQS_PRESENT)("AWS SQS live lifecycle", () => {
     const b = backend!;
 
     const marker = uniqueName("msg");
+    log.step("sending message", { queueUrl, marker });
     await b.send({ marker, n: 42 });
 
     // Bounded long-poll via the API's own WaitTimeSeconds (no manual polling).
+    log.step("receiving message", { queueUrl, waitSeconds: 20 });
     const received = await b.receive(1, 20);
     expect(received.length).toBeGreaterThanOrEqual(1);
     const msg = received[0];
     expect(msg.body).toEqual({ marker, n: 42 });
+    log.step("received message", { queueUrl, marker, count: received.length });
 
     await b.delete(msg.receiptHandle);
+    log.step("acknowledged message", { queueUrl, marker });
     expect(await b.healthCheck()).toBe(true);
+    log.step("health check passed", { queueUrl });
   });
 });
 
@@ -234,6 +268,7 @@ describe.skipIf(!SQS_PRESENT)("AWS SQS live lifecycle", () => {
 /* ================================================================== */
 
 describe.skipIf(!SNS_PRESENT)("AWS SNS live lifecycle", () => {
+  const log = liveLog("aws:sns");
   let topicArn: string;
   let createdTopic = false;
   let rawClient: SNSClient | undefined;
@@ -243,27 +278,36 @@ describe.skipIf(!SNS_PRESENT)("AWS SNS live lifecycle", () => {
     const provided = env("CLOUDRIFT_LIVE_AWS_TOPIC_ARN");
     if (provided !== undefined) {
       topicArn = provided;
+      log.step("using provided topic", { topicArn });
     } else {
       rawClient = new SNSClient(awsClientConfig());
-      const res = await rawClient.send(new CreateTopicCommand({ Name: uniqueName("topic") }));
+      const topicName = uniqueName("topic");
+      log.step("creating topic", { topicName });
+      const res = await rawClient.send(new CreateTopicCommand({ Name: topicName }));
       topicArn = res.TopicArn!;
       createdTopic = true;
+      log.step("created topic", { topicName, topicArn });
     }
+    log.step("initializing backend", { provider: "sns" });
     backend = await getPubsub("sns", awsAuthOptions());
   });
 
   afterAll(async () => {
     try {
       await backend?.close();
+      log.step("closed backend", { topicArn });
     } catch (err) {
-      console.warn("[live sns] backend close failed:", err);
+      log.warn("backend close failed", err, { topicArn });
     }
     try {
       if (createdTopic && rawClient) {
         await rawClient.send(new DeleteTopicCommand({ TopicArn: topicArn }));
+        log.step("deleted created topic", { topicArn });
+      } else {
+        log.step("left provided topic intact", { topicArn });
       }
     } catch (err) {
-      console.warn("[live sns] cleanup failed:", err);
+      log.warn("cleanup failed", err, { topicArn });
     } finally {
       rawClient?.destroy();
     }
@@ -273,13 +317,18 @@ describe.skipIf(!SNS_PRESENT)("AWS SNS live lifecycle", () => {
     expect(backend).toBeDefined();
     const b = backend!;
 
+    log.step("publishing message", { topicArn });
     const id = await b.publish(topicArn, "cloudrift-live-sns");
     expect(id).toBeTruthy();
+    log.step("published message", { topicArn, messageId: id });
 
+    log.step("publishing batch", { topicArn, count: 2 });
     const ids = await b.publishBatch(topicArn, [{ message: "one" }, { message: "two" }]);
     expect(ids).toHaveLength(2);
+    log.step("published batch", { topicArn, count: ids.length });
 
     expect(await b.healthCheck()).toBe(true);
+    log.step("health check passed", { topicArn });
   });
 });
 
@@ -288,11 +337,13 @@ describe.skipIf(!SNS_PRESENT)("AWS SNS live lifecycle", () => {
 /* ================================================================== */
 
 describe.skipIf(!SECRETS_PRESENT)("AWS Secrets Manager live lifecycle", () => {
+  const log = liveLog("aws:secrets");
   const PREFIX = uniqueName("secret");
   const name = PREFIX;
   let backend: Awaited<ReturnType<typeof getSecrets>> | undefined;
 
   beforeAll(async () => {
+    log.step("initializing backend", { provider: "aws_secrets_manager", name });
     backend = await getSecrets("aws_secrets_manager", awsAuthOptions());
   });
 
@@ -301,13 +352,15 @@ describe.skipIf(!SECRETS_PRESENT)("AWS Secrets Manager live lifecycle", () => {
       // Backend force-deletes (ForceDeleteWithoutRecovery). Always safe — we
       // only ever create uniquely-named secrets here.
       await backend?.deleteSecret(name);
+      log.step("deleted secret", { name });
     } catch (err) {
-      console.warn("[live secrets] cleanup failed:", err);
+      log.warn("cleanup failed", err, { name });
     }
     try {
       await backend?.close();
+      log.step("closed backend", { name });
     } catch (err) {
-      console.warn("[live secrets] backend close failed:", err);
+      log.warn("backend close failed", err, { name });
     }
   });
 
@@ -316,10 +369,13 @@ describe.skipIf(!SECRETS_PRESENT)("AWS Secrets Manager live lifecycle", () => {
     const b = backend!;
 
     const value = "cloudrift-live-secret-value";
+    log.step("setting secret", { name });
     await b.setSecret(name, value);
     expect(await b.getSecret(name)).toBe(value);
+    log.step("read secret", { name });
 
     const listed = await b.listSecrets(PREFIX);
     expect(listed).toContain(name);
+    log.step("listed secrets", { prefix: PREFIX, count: listed.length });
   });
 });

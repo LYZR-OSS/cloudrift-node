@@ -79,6 +79,73 @@ export function requireEnv(names: string[]): boolean {
   return names.every((name) => env(name) !== undefined);
 }
 
+export interface LiveLogger {
+  step(action: string, fields?: Record<string, unknown>): void;
+  warn(action: string, err: unknown, fields?: Record<string, unknown>): void;
+}
+
+/**
+ * Structured console logging for live tests. Logs are always on when a live
+ * group runs because these tests touch real cloud resources.
+ */
+export function liveLog(scope: string): LiveLogger {
+  return {
+    step(action: string, fields?: Record<string, unknown>) {
+      console.info(formatLiveLog(scope, action, fields));
+    },
+    warn(action: string, err: unknown, fields?: Record<string, unknown>) {
+      console.warn(formatLiveLog(scope, action, { ...fields, error: errorSummary(err) }));
+    },
+  };
+}
+
+function formatLiveLog(scope: string, action: string, fields?: Record<string, unknown>): string {
+  const entries = fields === undefined ? [] : Object.entries(fields);
+  const metadata =
+    entries.length === 0
+      ? ""
+      : ` ${JSON.stringify(Object.fromEntries(entries.map(([k, v]) => [k, redact(k, v)])))}`;
+  return `[live:${scope}] ${action}${metadata}`;
+}
+
+function redact(key: string, value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return value;
+  }
+  if (isSensitiveKey(key)) {
+    return "<redacted>";
+  }
+  if (key.toLowerCase().endsWith("url")) {
+    return redactUrl(value);
+  }
+  return value;
+}
+
+function isSensitiveKey(key: string): boolean {
+  return /secret|password|token|credential|connectionString|accountKey|accessKey|clientSecret|uri/i.test(
+    key,
+  );
+}
+
+function redactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}/...`;
+  } catch {
+    return "<redacted-url>";
+  }
+}
+
+function errorSummary(err: unknown): string {
+  if (err instanceof Error) {
+    return `${err.name}: ${err.message}`;
+  }
+  return String(err);
+}
+
 /**
  * Per-service AWS gating selector (does NOT check LIVE or auth — callers
  * combine it with their auth gate).
