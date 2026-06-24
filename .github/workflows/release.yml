@@ -1,0 +1,64 @@
+name: Release
+
+# Manual-tag release flow (mirrors cloudrift-py's tag trigger + cloudrift-go's
+# tag + GitHub Release output). There is NO registry publish: as with the Go
+# module, the git tag + GitHub Release IS the release. Consumers install from
+# the tag.
+#
+# To cut a release:
+#   1. Bump "version" in package.json on main (e.g. 0.2.5).
+#   2. Tag the commit and push:  git tag v0.2.5 && git push origin v0.2.5
+# This workflow then verifies the tag matches package.json, runs the full
+# build:check gate, and creates the GitHub Release with auto-generated notes.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the git-tag-backed GitHub Release
+
+jobs:
+  release:
+    name: Release / verify + publish-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify tag matches package.json version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG#v}"
+          if ! printf '%s' "$TAG_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '$TAG' is not a clean vX.Y.Z semver tag."
+            exit 1
+          fi
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error file=package.json::Tag v$TAG_VERSION does not match package.json version $PKG_VERSION. Bump package.json before tagging."
+            exit 1
+          fi
+          echo "OK: tag v$TAG_VERSION matches package.json."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build check (lint + format + typecheck + build + test)
+        run: npm run build:check
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
