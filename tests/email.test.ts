@@ -359,6 +359,35 @@ describe("AWSSESBackend", () => {
     expect(sesHarness.destroyed).toBe(1);
   });
 
+  it("passes replyTo and bcc through Simple-content sends", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "noreply@example.com" });
+    await backend.send("to@x.com", "Subject", {
+      bodyText: "hello",
+      bcc: ["bcc1@x.com", "bcc2@x.com"],
+      replyTo: ["reply@x.com"],
+    });
+    const input = sesHarness.sendInputs[0]!;
+    expect((input.Destination as Record<string, unknown>).BccAddresses).toEqual([
+      "bcc1@x.com",
+      "bcc2@x.com",
+    ]);
+    expect(input.ReplyToAddresses).toEqual(["reply@x.com"]);
+    await backend.close();
+  });
+
+  it("sends an html-only body (no Text part) in Simple content", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "noreply@example.com" });
+    await backend.send("to@x.com", "Subject", { bodyHtml: "<p>only html</p>" });
+    const content = sesHarness.sendInputs[0]!.Content as Record<string, Record<string, unknown>>;
+    const body = (content.Simple as Record<string, Record<string, unknown>>).Body as Record<
+      string,
+      unknown
+    >;
+    expect((body.Html as Record<string, unknown>).Data).toBe("<p>only html</p>");
+    expect(body.Text).toBeUndefined();
+    await backend.close();
+  });
+
   it("throws EmailSendError when the SES response omits MessageId", async () => {
     const backend = AWSSESBackend.fromIamRole({ defaultFrom: "noreply@example.com" });
     sesHarness.omitMessageId = true;
@@ -396,6 +425,39 @@ describe("AWSSESBackend", () => {
     expect(composed.headers).toMatchObject({ "X-Custom": "1" });
   });
 
+  it("propagates replyTo into the MIME builder on the raw path", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "noreply@example.com" });
+    await backend.send("to@x.com", "Subj", {
+      bodyText: "hello",
+      replyTo: ["reply@x.com"],
+      attachments: [{ filename: "a.txt", content: new TextEncoder().encode("x") }],
+    });
+    const composed = mimeHarness.messages[0]!;
+    expect(composed.replyTo).toEqual(["reply@x.com"]);
+  });
+
+  it("MIME builder drops case-insensitive managed headers but keeps custom ones", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "noreply@example.com" });
+    await backend.send("to@x.com", "Real Subject", {
+      bodyText: "hello",
+      headers: {
+        Subject: "spoofed",
+        FROM: "evil@x.com",
+        "Content-Type": "text/evil",
+        "X-Keep": "yes",
+      },
+    });
+    const composed = mimeHarness.messages[0]!;
+    const headers = (composed.headers ?? {}) as Record<string, string>;
+    // Managed headers (any case) must be filtered out so nodemailer owns them.
+    expect("Subject" in headers).toBe(false);
+    expect("FROM" in headers).toBe(false);
+    expect("Content-Type" in headers).toBe(false);
+    // Non-managed header survives, and the real subject is set on the message.
+    expect(headers["X-Keep"]).toBe("yes");
+    expect(composed.subject).toBe("Real Subject");
+  });
+
   it("throws EmailError when no sender resolvable", async () => {
     const backend = AWSSESBackend.fromIamRole({});
     await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
@@ -427,6 +489,49 @@ describe("AWSSESBackend", () => {
   it("maps TooManyRequestsException to EmailThrottledError", async () => {
     const backend = AWSSESBackend.fromIamRole({ defaultFrom: "a@b.com" });
     sesHarness.nextError = awsError("TooManyRequestsException");
+    await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+      EmailThrottledError,
+    );
+  });
+
+  it("maps MailFromDomainNotVerified to SenderUnverifiedError", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "a@b.com" });
+    sesHarness.nextError = awsError("MailFromDomainNotVerified");
+    await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+      SenderUnverifiedError,
+    );
+  });
+
+  it("maps the legacy Throttling code to EmailThrottledError", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "a@b.com" });
+    sesHarness.nextError = awsError("Throttling");
+    await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+      EmailThrottledError,
+    );
+  });
+
+  it("maps SendingPausedException to EmailThrottledError", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "a@b.com" });
+    sesHarness.nextError = awsError("SendingPausedException");
+    await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+      EmailThrottledError,
+    );
+  });
+
+  it("falls back to the .Code property when there is no error name", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "a@b.com" });
+    // A botocore-style error exposing `Code` (capital C) and no string `name`.
+    const err = { Code: "MessageRejected", message: "rejected" } as unknown as Error;
+    sesHarness.nextError = err;
+    await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+      RecipientRejectedError,
+    );
+  });
+
+  it("falls back to the lowercase .code property when name and .Code are absent", async () => {
+    const backend = AWSSESBackend.fromIamRole({ defaultFrom: "a@b.com" });
+    const err = { code: "SendingPausedException", message: "paused" } as unknown as Error;
+    sesHarness.nextError = err;
     await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
       EmailThrottledError,
     );
@@ -491,6 +596,69 @@ describe("SMTPEmailBackend", () => {
       auth: { user: "apikey", pass: "secret" },
     });
     expect(smtpHarness.closed).toBe(1);
+  });
+
+  it("sends replyTo and attachments, honoring explicit and default content types", async () => {
+    const backend = SMTPEmailBackend.fromStarttls({
+      host: "smtp.example.com",
+      username: "u",
+      password: "p",
+      defaultFrom: "noreply@example.com",
+    });
+    await backend.send("to@x.com", "Hi", {
+      bodyText: "body",
+      replyTo: ["reply@x.com"],
+      attachments: [
+        {
+          filename: "report.pdf",
+          content: new Uint8Array([1, 2, 3]),
+          contentType: "application/pdf",
+        },
+        { filename: "blob.bin", content: new Uint8Array([4, 5]) },
+      ],
+    });
+    const msg = smtpHarness.sentMessages[0]!;
+    expect(msg.replyTo).toEqual(["reply@x.com"]);
+    const atts = msg.attachments as Array<Record<string, unknown>>;
+    expect(atts).toHaveLength(2);
+    expect(atts[0]!.filename).toBe("report.pdf");
+    expect(atts[0]!.contentType).toBe("application/pdf");
+    // No explicit contentType => the octet-stream default.
+    expect(atts[1]!.contentType).toBe("application/octet-stream");
+  });
+
+  it("maps transient 450/451/452 reply codes to EmailThrottledError", async () => {
+    for (const responseCode of [450, 451, 452]) {
+      smtpHarness.sentMessages = [];
+      const backend = SMTPEmailBackend.fromStarttls({
+        host: "h",
+        username: "u",
+        password: "p",
+        defaultFrom: "a@b.com",
+      });
+      smtpHarness.nextError = Object.assign(new Error(`transient ${responseCode}`), {
+        responseCode,
+      });
+      await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+        EmailThrottledError,
+      );
+    }
+  });
+
+  it("maps 551/553 reply codes (no EENVELOPE) to RecipientRejectedError", async () => {
+    for (const responseCode of [551, 553]) {
+      smtpHarness.sentMessages = [];
+      const backend = SMTPEmailBackend.fromStarttls({
+        host: "h",
+        username: "u",
+        password: "p",
+        defaultFrom: "a@b.com",
+      });
+      smtpHarness.nextError = Object.assign(new Error(`refused ${responseCode}`), { responseCode });
+      await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+        RecipientRejectedError,
+      );
+    }
   });
 
   it("maps a recipient-refused reply code to RecipientRejectedError", async () => {
@@ -606,6 +774,21 @@ describe("AzureACSEmailBackend", () => {
     expect(att.contentInBase64).toBe(Buffer.from([1, 2, 3]).toString("base64"));
   });
 
+  it("maps replyTo and bcc into the ACS message shape", async () => {
+    const backend = AzureACSEmailBackend.fromConnectionString({
+      connectionString: "endpoint=https://x;accesskey=K",
+      defaultFrom: "a@b.com",
+    });
+    await backend.send("to@x.com", "Subj", {
+      bodyText: "hi",
+      bcc: ["bcc@x.com"],
+      replyTo: ["reply@x.com"],
+    });
+    const msg = acsHarness.sendMessages[0]!;
+    expect((msg.recipients as Record<string, unknown>).bcc).toEqual([{ address: "bcc@x.com" }]);
+    expect(msg.replyTo).toEqual([{ address: "reply@x.com" }]);
+  });
+
   it("managed identity auth builds a ManagedIdentityCredential and closes it", async () => {
     const backend = AzureACSEmailBackend.fromManagedIdentity({
       endpoint: "https://x.communication.azure.com",
@@ -674,6 +857,17 @@ describe("AzureACSEmailBackend", () => {
     );
   });
 
+  it("maps a 400 InvalidAddress to RecipientRejectedError", async () => {
+    const backend = AzureACSEmailBackend.fromConnectionString({
+      connectionString: "endpoint=https://x;accesskey=K",
+      defaultFrom: "a@b.com",
+    });
+    acsHarness.nextError = Object.assign(new Error("InvalidAddress format"), { statusCode: 400 });
+    await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
+      RecipientRejectedError,
+    );
+  });
+
   it("maps an unknown error to EmailSendError", async () => {
     const backend = AzureACSEmailBackend.fromConnectionString({
       connectionString: "endpoint=https://x;accesskey=K",
@@ -683,6 +877,38 @@ describe("AzureACSEmailBackend", () => {
     await expect(backend.send("to@x.com", "s", { bodyText: "hi" })).rejects.toBeInstanceOf(
       EmailSendError,
     );
+  });
+
+  it("close is idempotent: it closes the token credential once and a second call is a no-op", async () => {
+    // Ported from cloudrift-py/tests/test_email.py::test_acs_close_idempotent.
+    const backend = AzureACSEmailBackend.fromManagedIdentity({
+      endpoint: "https://x.communication.azure.com",
+      defaultFrom: "a@b.com",
+      clientId: "mi-client",
+    });
+    // Force lazy client + credential creation.
+    await backend.send("to@x.com", "s", { bodyText: "hi" });
+    const cred = acsHarness.credentials[0]!;
+    expect(cred.closed).toBe(false);
+
+    await backend.close();
+    expect(cred.closed).toBe(true);
+    // A second close must not raise (credential already released).
+    await expect(backend.close()).resolves.toBeUndefined();
+    // No duplicate credential was created/closed.
+    expect(acsHarness.credentials).toHaveLength(1);
+  });
+
+  it("connection-string close is a no-op (no credential to release)", async () => {
+    const backend = AzureACSEmailBackend.fromConnectionString({
+      connectionString: "endpoint=https://x;accesskey=K",
+      defaultFrom: "a@b.com",
+    });
+    await backend.send("to@x.com", "s", { bodyText: "hi" });
+    // No credential was constructed for connection-string auth.
+    expect(acsHarness.credentials).toHaveLength(0);
+    await expect(backend.close()).resolves.toBeUndefined();
+    await expect(backend.close()).resolves.toBeUndefined();
   });
 });
 
