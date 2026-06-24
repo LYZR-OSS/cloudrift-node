@@ -17,11 +17,26 @@ import {
   ListObjectsV2Command,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
-import { SQSClient, CreateQueueCommand, DeleteQueueCommand } from "@aws-sdk/client-sqs";
+import {
+  SQSClient,
+  CreateQueueCommand,
+  DeleteQueueCommand,
+  GetQueueAttributesCommand,
+  ReceiveMessageCommand,
+  DeleteMessageCommand,
+} from "@aws-sdk/client-sqs";
 import { SNSClient, CreateTopicCommand, DeleteTopicCommand } from "@aws-sdk/client-sns";
 
 import { getStorage, getQueue, getPubsub, getSecrets } from "../../src/index.js";
-import { awsServiceEnabled, env, liveLog, requireEnv, uniqueName } from "./env.js";
+import type { Message } from "../../src/index.js";
+import {
+  awsServiceEnabled,
+  env,
+  getSqsExtrasConfig,
+  liveLog,
+  requireEnv,
+  uniqueName,
+} from "./env.js";
 
 /* ------------------------------------------------------------------ */
 /* Shared AWS auth resolution                                          */
@@ -377,5 +392,417 @@ describe.skipIf(!SECRETS_PRESENT)("AWS Secrets Manager live lifecycle", () => {
     const listed = await b.listSecrets(PREFIX);
     expect(listed).toContain(name);
     log.step("listed secrets", { prefix: PREFIX, count: listed.length });
+  });
+});
+
+/* ================================================================== */
+/* SQS FIFO (ordering + dedup)                                        */
+/* ================================================================== */
+
+describe.skipIf(!SQS_PRESENT)("AWS SQS FIFO live lifecycle", () => {
+  const log = liveLog("aws:sqs:fifo");
+  let queueUrl: string;
+  let createdQueue = false;
+  let rawClient: SQSClient | undefined;
+  let backend: Awaited<ReturnType<typeof getQueue>> | undefined;
+
+  beforeAll(async () => {
+    const provided = getSqsExtrasConfig().fifoQueueUrl;
+    rawClient = new SQSClient(awsClientConfig());
+    if (provided !== undefined) {
+      queueUrl = provided;
+      log.step("using provided FIFO queue", { queueUrl });
+    } else {
+      // FIFO queue names MUST end with ".fifo".
+      const queueName = `${uniqueName("fifo")}.fifo`;
+      log.step("creating FIFO queue", { queueName });
+      const res = await rawClient.send(
+        new CreateQueueCommand({
+          QueueName: queueName,
+          Attributes: { FifoQueue: "true", ContentBasedDeduplication: "true" },
+        }),
+      );
+      queueUrl = res.QueueUrl!;
+      createdQueue = true;
+      log.step("created FIFO queue", { queueName, queueUrl });
+    }
+    // The backend keys FIFO behavior off the ".fifo" URL suffix.
+    expect(queueUrl.endsWith(".fifo")).toBe(true);
+    log.step("initializing backend", { provider: "sqs", queueUrl });
+    backend = await getQueue("sqs", { ...awsAuthOptions(), queueUrl });
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.close();
+      log.step("closed backend", { queueUrl });
+    } catch (err) {
+      log.warn("backend close failed", err, { queueUrl });
+    }
+    try {
+      if (createdQueue && rawClient) {
+        await rawClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl }));
+        log.step("deleted created FIFO queue", { queueUrl });
+      } else {
+        log.step("left provided FIFO queue intact", { queueUrl });
+      }
+    } catch (err) {
+      log.warn("cleanup failed", err, { queueUrl });
+    } finally {
+      rawClient?.destroy();
+    }
+  });
+
+  it("sends with groupId/dedupId, suppresses duplicates, and preserves order", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+    const groupId = uniqueName("grp");
+
+    // (1) groupId/dedupId round-trip: receive returns both attributes.
+    const dedupId = uniqueName("dedup");
+    const marker = uniqueName("fifo-msg");
+    log.step("sending FIFO message", { queueUrl, groupId, dedupId, marker });
+    await b.send({ marker, seq: 0 }, 0, { groupId, dedupId });
+
+    const first = await b.receive(1, 20);
+    expect(first.length).toBeGreaterThanOrEqual(1);
+    const firstMsg = first[0];
+    expect(firstMsg.body).toEqual({ marker, seq: 0 });
+    expect(firstMsg.groupId).toBe(groupId);
+    expect(firstMsg.dedupId).toBe(dedupId);
+    log.step("received FIFO message with attributes", { groupId, dedupId });
+    await b.delete(firstMsg.receiptHandle);
+
+    // (2) Deduplication: the same dedupId sent twice is delivered once. Use a
+    // fresh dedupId/group so this is isolated from the round-trip above.
+    const dupGroup = uniqueName("grp-dup");
+    const dupId = uniqueName("dedup-dup");
+    const dupMarker = uniqueName("fifo-dup");
+    log.step("sending duplicate dedupId twice", { dupGroup, dupId });
+    await b.send({ marker: dupMarker, copy: 1 }, 0, { groupId: dupGroup, dedupId: dupId });
+    await b.send({ marker: dupMarker, copy: 2 }, 0, { groupId: dupGroup, dedupId: dupId });
+
+    // Drain up to a few times; only ONE copy of dupMarker may ever appear.
+    const dupSeen: Message[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const batch = await b.receive(10, 5);
+      for (const m of batch) {
+        if (m.body.marker === dupMarker) {
+          dupSeen.push(m);
+        }
+        await b.delete(m.receiptHandle);
+      }
+      if (dupSeen.length >= 1) {
+        break;
+      }
+    }
+    expect(dupSeen.length).toBe(1);
+    log.step("dedup suppressed duplicate", { received: dupSeen.length });
+
+    // (3) Ordering within a group: messages in one group are received in send
+    // order. Use a fresh group so prior messages do not interleave.
+    const orderGroup = uniqueName("grp-order");
+    const orderMarker = uniqueName("fifo-order");
+    const total = 3;
+    for (let seq = 0; seq < total; seq += 1) {
+      await b.send({ marker: orderMarker, seq }, 0, {
+        groupId: orderGroup,
+        dedupId: `${orderMarker}-${seq}`,
+      });
+    }
+    log.step("sent ordered batch", { orderGroup, total });
+
+    const ordered: number[] = [];
+    for (let attempt = 0; attempt < 5 && ordered.length < total; attempt += 1) {
+      const batch = await b.receive(10, 10);
+      for (const m of batch) {
+        if (m.body.marker === orderMarker) {
+          expect(m.groupId).toBe(orderGroup);
+          ordered.push(m.body.seq as number);
+        }
+        await b.delete(m.receiptHandle);
+      }
+    }
+    expect(ordered).toEqual([0, 1, 2]);
+    log.step("received ordered batch in order", { ordered });
+  });
+});
+
+/* ================================================================== */
+/* SQS dead-letter round-trip                                         */
+/* ================================================================== */
+
+describe.skipIf(!SQS_PRESENT)("AWS SQS dead-letter live lifecycle", () => {
+  const log = liveLog("aws:sqs:dlq");
+  let sourceUrl: string;
+  let dlqUrl: string;
+  let createdSource = false;
+  let createdDlq = false;
+  let rawClient: SQSClient | undefined;
+  let backend: Awaited<ReturnType<typeof getQueue>> | undefined;
+
+  beforeAll(async () => {
+    rawClient = new SQSClient(awsClientConfig());
+    const extras = getSqsExtrasConfig();
+
+    // Resolve / create the DLQ first so we can read its ARN for the source's
+    // RedrivePolicy.
+    if (extras.dlqUrl !== undefined) {
+      dlqUrl = extras.dlqUrl;
+      log.step("using provided DLQ", { dlqUrl });
+    } else {
+      const dlqName = uniqueName("dlq");
+      log.step("creating DLQ", { dlqName });
+      const dlqRes = await rawClient.send(new CreateQueueCommand({ QueueName: dlqName }));
+      dlqUrl = dlqRes.QueueUrl!;
+      createdDlq = true;
+      log.step("created DLQ", { dlqName, dlqUrl });
+    }
+
+    const arnRes = await rawClient.send(
+      new GetQueueAttributesCommand({ QueueUrl: dlqUrl, AttributeNames: ["QueueArn"] }),
+    );
+    const dlqArn = arnRes.Attributes?.QueueArn;
+    expect(dlqArn).toBeTruthy();
+
+    const sourceName = uniqueName("dlq-src");
+    log.step("creating source queue with RedrivePolicy", { sourceName });
+    const srcRes = await rawClient.send(
+      new CreateQueueCommand({
+        QueueName: sourceName,
+        Attributes: {
+          RedrivePolicy: JSON.stringify({ deadLetterTargetArn: dlqArn, maxReceiveCount: 5 }),
+        },
+      }),
+    );
+    sourceUrl = srcRes.QueueUrl!;
+    createdSource = true;
+    log.step("created source queue", { sourceName, sourceUrl });
+
+    log.step("initializing backend", { provider: "sqs", queueUrl: sourceUrl });
+    backend = await getQueue("sqs", { ...awsAuthOptions(), queueUrl: sourceUrl });
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.close();
+      log.step("closed backend", { queueUrl: sourceUrl });
+    } catch (err) {
+      log.warn("backend close failed", err, { queueUrl: sourceUrl });
+    }
+    try {
+      if (createdSource && rawClient) {
+        await rawClient.send(new DeleteQueueCommand({ QueueUrl: sourceUrl }));
+        log.step("deleted created source queue", { sourceUrl });
+      }
+    } catch (err) {
+      log.warn("source cleanup failed", err, { sourceUrl });
+    }
+    try {
+      if (createdDlq && rawClient) {
+        await rawClient.send(new DeleteQueueCommand({ QueueUrl: dlqUrl }));
+        log.step("deleted created DLQ", { dlqUrl });
+      }
+    } catch (err) {
+      log.warn("dlq cleanup failed", err, { dlqUrl });
+    } finally {
+      rawClient?.destroy();
+    }
+  });
+
+  it("dead-letters a received message to the DLQ with the reason attribute", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+    const marker = uniqueName("dlq-msg");
+    const reason = "live-dead-letter-reason";
+
+    log.step("sending message to source", { sourceUrl, marker });
+    await b.send({ marker, n: 7 });
+
+    const received = await b.receive(1, 20);
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const msg = received[0];
+    expect(msg.body).toEqual({ marker, n: 7 });
+    log.step("received from source", { marker });
+
+    // Backend resolves the DLQ via the source RedrivePolicy and moves it there.
+    await b.deadLetter(msg.receiptHandle, reason);
+    log.step("dead-lettered message", { marker, reason });
+
+    // Read it back from the DLQ directly (raw SDK) and assert body + reason.
+    let dlqBody: Record<string, unknown> | undefined;
+    let dlqReason: string | undefined;
+    let dlqHandle: string | undefined;
+    for (let attempt = 0; attempt < 6 && dlqBody === undefined; attempt += 1) {
+      const res = await rawClient!.send(
+        new ReceiveMessageCommand({
+          QueueUrl: dlqUrl,
+          MaxNumberOfMessages: 10,
+          WaitTimeSeconds: 10,
+          MessageAttributeNames: ["All"],
+        }),
+      );
+      for (const m of res.Messages ?? []) {
+        const body = JSON.parse(m.Body ?? "{}") as Record<string, unknown>;
+        if (body.marker === marker) {
+          dlqBody = body;
+          dlqReason = m.MessageAttributes?.DeadLetterReason?.StringValue;
+          dlqHandle = m.ReceiptHandle;
+        }
+      }
+    }
+    expect(dlqBody).toEqual({ marker, n: 7 });
+    expect(dlqReason).toBe(reason);
+    log.step("verified message in DLQ", { marker, reason });
+
+    if (dlqHandle !== undefined) {
+      await rawClient!.send(
+        new DeleteMessageCommand({ QueueUrl: dlqUrl, ReceiptHandle: dlqHandle }),
+      );
+    }
+  });
+});
+
+/* ================================================================== */
+/* SQS getQueueDepth                                                  */
+/* ================================================================== */
+
+describe.skipIf(!SQS_PRESENT)("AWS SQS getQueueDepth live lifecycle", () => {
+  const log = liveLog("aws:sqs:depth");
+  let queueUrl: string;
+  let createdQueue = false;
+  let rawClient: SQSClient | undefined;
+  let backend: Awaited<ReturnType<typeof getQueue>> | undefined;
+
+  beforeAll(async () => {
+    // Always create a dedicated queue so depth assertions are not polluted by an
+    // env-provided shared queue's backlog.
+    rawClient = new SQSClient(awsClientConfig());
+    const queueName = uniqueName("depth");
+    log.step("creating queue", { queueName });
+    const res = await rawClient.send(new CreateQueueCommand({ QueueName: queueName }));
+    queueUrl = res.QueueUrl!;
+    createdQueue = true;
+    log.step("created queue", { queueName, queueUrl });
+    backend = await getQueue("sqs", { ...awsAuthOptions(), queueUrl });
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.close();
+      log.step("closed backend", { queueUrl });
+    } catch (err) {
+      log.warn("backend close failed", err, { queueUrl });
+    }
+    try {
+      if (createdQueue && rawClient) {
+        await rawClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl }));
+        log.step("deleted created queue", { queueUrl });
+      }
+    } catch (err) {
+      log.warn("cleanup failed", err, { queueUrl });
+    } finally {
+      rawClient?.destroy();
+    }
+  });
+
+  it("reports 0 on an empty queue then reflects N enqueued messages", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+
+    const initial = await b.getQueueDepth();
+    expect(initial).toBe(0);
+    log.step("initial depth", { depth: initial });
+
+    const n = 3;
+    const marker = uniqueName("depth-msg");
+    for (let i = 0; i < n; i += 1) {
+      await b.send({ marker, i });
+    }
+    log.step("sent messages", { n });
+
+    // ApproximateNumberOfMessages is eventually consistent; the live lane's
+    // retry:2 absorbs transient under-counts.
+    const depth = await b.getQueueDepth();
+    expect(depth).toBe(n);
+    log.step("depth after sends", { depth });
+  });
+});
+
+/* ================================================================== */
+/* SQS nack (redelivery)                                              */
+/* ================================================================== */
+
+describe.skipIf(!SQS_PRESENT)("AWS SQS nack live lifecycle", () => {
+  const log = liveLog("aws:sqs:nack");
+  let queueUrl: string;
+  let createdQueue = false;
+  let rawClient: SQSClient | undefined;
+  let backend: Awaited<ReturnType<typeof getQueue>> | undefined;
+
+  beforeAll(async () => {
+    rawClient = new SQSClient(awsClientConfig());
+    const queueName = uniqueName("nack");
+    log.step("creating queue", { queueName });
+    const res = await rawClient.send(new CreateQueueCommand({ QueueName: queueName }));
+    queueUrl = res.QueueUrl!;
+    createdQueue = true;
+    log.step("created queue", { queueName, queueUrl });
+    backend = await getQueue("sqs", { ...awsAuthOptions(), queueUrl });
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.close();
+      log.step("closed backend", { queueUrl });
+    } catch (err) {
+      log.warn("backend close failed", err, { queueUrl });
+    }
+    try {
+      if (createdQueue && rawClient) {
+        await rawClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl }));
+        log.step("deleted created queue", { queueUrl });
+      }
+    } catch (err) {
+      log.warn("cleanup failed", err, { queueUrl });
+    } finally {
+      rawClient?.destroy();
+    }
+  });
+
+  it("redelivers a nacked message with an incremented receiveCount", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+    const marker = uniqueName("nack-msg");
+
+    log.step("sending message", { queueUrl, marker });
+    await b.send({ marker, n: 1 });
+
+    const first = await b.receive(1, 20);
+    expect(first.length).toBeGreaterThanOrEqual(1);
+    const firstMsg = first[0];
+    expect(firstMsg.body).toEqual({ marker, n: 1 });
+    expect(firstMsg.receiveCount).toBe(1);
+    log.step("first receive", { marker, receiveCount: firstMsg.receiveCount });
+
+    // nack -> visibility timeout 0 -> immediately redeliverable.
+    await b.nack(firstMsg.receiptHandle);
+    log.step("nacked message", { marker });
+
+    let redelivered: Message | undefined;
+    for (let attempt = 0; attempt < 5 && redelivered === undefined; attempt += 1) {
+      const batch = await b.receive(1, 20);
+      for (const m of batch) {
+        if (m.body.marker === marker) {
+          redelivered = m;
+        }
+      }
+    }
+    expect(redelivered).toBeDefined();
+    expect(redelivered!.body).toEqual({ marker, n: 1 });
+    expect(redelivered!.receiveCount).toBeGreaterThanOrEqual(2);
+    log.step("redelivered message", { marker, receiveCount: redelivered!.receiveCount });
+
+    await b.delete(redelivered!.receiptHandle);
   });
 });

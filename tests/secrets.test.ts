@@ -25,8 +25,37 @@ import {
   getSecrets,
 } from "../src/secrets/index.js";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Allow individual tests to force `rename`/`writeFile` failures while keeping
+// every other fs/promises export real. file.ts imports these by name, so they
+// must be mocked at the module boundary (a post-hoc spy would not intercept the
+// already-bound named imports).
+const fsControl = vi.hoisted(() => ({
+  renameError: undefined as Error | undefined,
+  writeError: undefined as Error | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: async (from: string, to: string) => {
+      if (fsControl.renameError) {
+        throw fsControl.renameError;
+      }
+      return actual.rename(from, to);
+    },
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      if (fsControl.writeError) {
+        throw fsControl.writeError;
+      }
+      return actual.writeFile(...args);
+    },
+  };
+});
 
 const smMock = mockClient(SecretsManagerClient);
 const credentialProviderMock = vi.hoisted(() => ({
@@ -863,6 +892,13 @@ describe("FileSecretBackend", () => {
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "cloudrift-secrets-"));
     path = join(dir, "secrets.json");
+    fsControl.renameError = undefined;
+    fsControl.writeError = undefined;
+  });
+
+  afterEach(() => {
+    fsControl.renameError = undefined;
+    fsControl.writeError = undefined;
   });
 
   it("dispatches via getSecrets('file') and persists set/get atomically", async () => {
@@ -910,6 +946,79 @@ describe("FileSecretBackend", () => {
     const backend = new FileSecretBackend({ path });
     await backend.setSecret("cfg", JSON.stringify({ host: "h" }));
     expect(await backend.getSecretJson("cfg")).toEqual({ host: "h" });
+  });
+
+  it("writes via a temp file: a failed rename leaves the existing file intact", async () => {
+    const backend = new FileSecretBackend({ path });
+    // Seed an initial, committed value.
+    await backend.setSecret("db", "original");
+    expect(JSON.parse(await readFile(path, "utf-8"))).toEqual({ db: "original" });
+
+    // Now force the rename step to fail mid-write. An atomic temp+rename impl
+    // writes the new payload to `${path}.tmp`, so the final file is untouched.
+    // A mutant that writes straight to `path` would have already clobbered it.
+    fsControl.renameError = Object.assign(new Error("EXDEV: cross-device"), { code: "EXDEV" });
+    await expect(backend.setSecret("db", "updated")).rejects.toThrow(/EXDEV/);
+
+    // The on-disk file must still hold the ORIGINAL value (no partial/clobbered
+    // write). This is the assertion that kills the "write straight to path" mutant.
+    expect(JSON.parse(await readFile(path, "utf-8"))).toEqual({ db: "original" });
+
+    // The temp file received the new payload (proving the temp-file path is used),
+    // never the final path directly.
+    const tmp = `${path}.tmp`;
+    expect(existsSync(tmp)).toBe(true);
+    expect(JSON.parse(await readFile(tmp, "utf-8"))).toEqual({ db: "updated" });
+  });
+
+  it("a failed temp write never touches the existing target file", async () => {
+    const backend = new FileSecretBackend({ path });
+    await backend.setSecret("k", "safe");
+
+    fsControl.writeError = Object.assign(new Error("ENOSPC: disk full"), { code: "ENOSPC" });
+    await expect(backend.setSecret("k", "doomed")).rejects.toThrow(/ENOSPC/);
+
+    // Original committed value survives a write that blew up before rename.
+    expect(JSON.parse(await readFile(path, "utf-8"))).toEqual({ k: "safe" });
+  });
+
+  it("a read concurrent with a write only ever observes a complete, atomic state", async () => {
+    const backend = new FileSecretBackend({ path });
+    await backend.setSecret("v", "old");
+
+    // Interleave a write with several concurrent reads. Because the new payload
+    // is staged in a temp file and swapped in by a single atomic rename, every
+    // concurrent read must observe either the OLD or the NEW complete value —
+    // never a half-written / truncated file. A non-atomic (write-in-place) impl
+    // could expose a torn read here.
+    const reads = Promise.all(
+      Array.from({ length: 8 }, async () => {
+        const v = await backend.getSecret("v");
+        expect(["old", "new"]).toContain(v);
+        return v;
+      }),
+    );
+    const write = backend.setSecret("v", "new");
+    await Promise.all([write, reads]);
+
+    // The write committed and the final value is the new one.
+    expect(await backend.getSecret("v")).toBe("new");
+    // rename consumed the temp file; nothing lingers on the happy path.
+    expect(existsSync(`${path}.tmp`)).toBe(false);
+  });
+
+  it("sequential rapid writes to distinct keys all persist and keep valid JSON", async () => {
+    const backend = new FileSecretBackend({ path });
+    for (const [k, v] of [
+      ["a", "1"],
+      ["b", "2"],
+      ["c", "3"],
+    ] as const) {
+      await backend.setSecret(k, v);
+    }
+    const onDisk = JSON.parse(await readFile(path, "utf-8")) as Record<string, string>;
+    expect(onDisk).toEqual({ a: "1", b: "2", c: "3" });
+    expect(existsSync(`${path}.tmp`)).toBe(false);
   });
 });
 

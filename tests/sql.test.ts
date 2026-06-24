@@ -71,6 +71,7 @@ vi.mock("mysql2/promise", () => ({
 
 const mssqlHarness = vi.hoisted(() => ({
   configs: [] as Record<string, unknown>[],
+  connectError: undefined as unknown,
 }));
 
 vi.mock("mssql", () => {
@@ -79,6 +80,9 @@ vi.mock("mssql", () => {
       mssqlHarness.configs.push(config);
     }
     async connect(): Promise<this> {
+      if (mssqlHarness.connectError !== undefined) {
+        throw mssqlHarness.connectError;
+      }
       return this;
     }
     async close(): Promise<void> {}
@@ -88,11 +92,21 @@ vi.mock("mssql", () => {
 
 const oracleHarness = vi.hoisted(() => ({
   configs: [] as Record<string, unknown>[],
+  connectError: undefined as unknown,
+  hang: false,
 }));
 
 vi.mock("oracledb", () => ({
   getConnection: vi.fn(async (config: Record<string, unknown>) => {
     oracleHarness.configs.push(config);
+    if (oracleHarness.hang) {
+      // Never resolves on its own; the only live timer is withTimeout's, so the
+      // race is fully deterministic under fake timers.
+      return new Promise<never>(() => {});
+    }
+    if (oracleHarness.connectError !== undefined) {
+      throw oracleHarness.connectError;
+    }
     return { close: async () => {} };
   }),
 }));
@@ -100,16 +114,24 @@ vi.mock("oracledb", () => ({
 const databricksHarness = vi.hoisted(() => ({
   connectOptions: [] as Record<string, unknown>[],
   sessionOptions: [] as (Record<string, unknown> | undefined)[],
+  connectError: undefined as unknown,
+  sessionHang: false,
 }));
 
 vi.mock("@databricks/sql", () => {
   class DBSQLClient {
     async connect(options: Record<string, unknown>): Promise<this> {
       databricksHarness.connectOptions.push(options);
+      if (databricksHarness.connectError !== undefined) {
+        throw databricksHarness.connectError;
+      }
       return this;
     }
     async openSession(options?: Record<string, unknown>): Promise<{ close(): Promise<void> }> {
       databricksHarness.sessionOptions.push(options);
+      if (databricksHarness.sessionHang) {
+        return new Promise<never>(() => {});
+      }
       return { close: async () => {} };
     }
   }
@@ -140,6 +162,7 @@ vi.mock("@aws-sdk/rds-signer", () => {
 const azureHarness = vi.hoisted(() => ({
   ctorArgs: [] as unknown[][],
   token: "aad-token",
+  tokenFail: false,
 }));
 
 vi.mock("@azure/identity", () => {
@@ -148,6 +171,9 @@ vi.mock("@azure/identity", () => {
       azureHarness.ctorArgs.push(["service-principal", ...args]);
     }
     async getToken(): Promise<{ token: string }> {
+      if (azureHarness.tokenFail) {
+        throw new Error("AAD token endpoint unreachable");
+      }
       return { token: azureHarness.token };
     }
   }
@@ -156,6 +182,9 @@ vi.mock("@azure/identity", () => {
       azureHarness.ctorArgs.push(["managed", ...args]);
     }
     async getToken(): Promise<{ token: string }> {
+      if (azureHarness.tokenFail) {
+        throw new Error("AAD token endpoint unreachable");
+      }
       return { token: azureHarness.token };
     }
   }
@@ -172,12 +201,18 @@ afterEach(() => {
   mysqlHarness.configs.length = 0;
   mysqlHarness.connectError = undefined;
   mssqlHarness.configs.length = 0;
+  mssqlHarness.connectError = undefined;
   oracleHarness.configs.length = 0;
+  oracleHarness.connectError = undefined;
+  oracleHarness.hang = false;
   databricksHarness.connectOptions.length = 0;
   databricksHarness.sessionOptions.length = 0;
+  databricksHarness.connectError = undefined;
+  databricksHarness.sessionHang = false;
   rdsHarness.signerArgs.length = 0;
   rdsHarness.fail = false;
   azureHarness.ctorArgs.length = 0;
+  azureHarness.tokenFail = false;
 });
 
 /* ------------------------------------------------------------------ */
@@ -417,6 +452,43 @@ describe("PostgresSQLBackend", () => {
     expect(pgHarness.configs[0].client_encoding).toBe("utf8");
   });
 
+  it("Redshift fromUrl returns a RedshiftSQLBackend and parses the DSN (default port 5439)", async () => {
+    const withPort = RedshiftSQLBackend.fromUrl({ url: "redshift://u:p@rs.aws:5439/dw" });
+    expect(withPort).toBeInstanceOf(RedshiftSQLBackend);
+    expect(withPort.dialect).toBe("redshift");
+    await withPort.connect();
+    expect(pgHarness.configs[0].host).toBe("rs.aws");
+    expect(pgHarness.configs[0].port).toBe(5439);
+    expect(pgHarness.configs[0].database).toBe("dw");
+
+    pgHarness.configs.length = 0;
+    // Redshift inherits PostgresSQLBackend.fromUrl, whose default port is 5432;
+    // a portless DSN therefore falls back to 5432 (parity with the base class).
+    const noPort = RedshiftSQLBackend.fromUrl({ url: "u:p@rs.aws/dw" });
+    await noPort.connect();
+    expect(pgHarness.configs[0].port).toBe(5432);
+  });
+
+  it("Redshift fromIamAuth mints a fresh token and forces ssl", async () => {
+    const backend = RedshiftSQLBackend.fromIamAuth({
+      host: "rs.aws",
+      port: 5439,
+      user: "iamuser",
+      database: "dw",
+      region: "us-east-1",
+    });
+    expect(backend).toBeInstanceOf(RedshiftSQLBackend);
+    await backend.connect();
+    expect(pgHarness.configs[0].password).toBe("rds-iam-token");
+    expect(pgHarness.configs[0].ssl).toEqual({ rejectUnauthorized: false });
+    expect(rdsHarness.signerArgs[0]).toMatchObject({
+      hostname: "rs.aws",
+      port: 5439,
+      username: "iamuser",
+      region: "us-east-1",
+    });
+  });
+
   it("withConnection tears down the native connection afterward (via end())", async () => {
     const backend = PostgresSQLBackend.fromCredentials({
       host: "db",
@@ -520,6 +592,55 @@ describe("MySQLSQLBackend", () => {
     await backend.connect();
     expect(mysqlHarness.configs[0].port).toBe(3306);
   });
+
+  it("maps a driver connect failure to SQLConnectionError", async () => {
+    mysqlHarness.connectError = new Error("ECONNREFUSED");
+    const backend = MySQLSQLBackend.fromCredentials({
+      host: "db",
+      port: 3306,
+      user: "u",
+      password: "p",
+      database: "app",
+    });
+    await expect(backend.connect()).rejects.toBeInstanceOf(SQLConnectionError);
+  });
+
+  it("maps an IAM rdsToken failure to SQLAuthError (not SQLConnectionError)", async () => {
+    rdsHarness.fail = true;
+    const backend = MySQLSQLBackend.fromIamAuth({
+      host: "rds.aws",
+      port: 3306,
+      user: "iamuser",
+      database: "app",
+      region: "eu-west-1",
+    });
+    // The signer throws first, so the auth error must not be masked as a
+    // connection error by the surrounding try/catch.
+    await expect(backend.connect()).rejects.toBeInstanceOf(SQLAuthError);
+    // The driver was never reached.
+    expect(mysqlHarness.configs.length).toBe(0);
+  });
+
+  it("sqlalchemyUrl builds a percent-encoded URL but rejects IAM auth", () => {
+    const creds = MySQLSQLBackend.fromCredentials({
+      host: "db",
+      port: 3306,
+      user: "u",
+      password: "p@ss",
+      database: "app",
+    });
+    expect(creds.sqlalchemyUrl()).toBe("mysql+aiomysql://u:p%40ss@db:3306/app");
+    // A custom driver scheme overrides the default.
+    expect(creds.sqlalchemyUrl("mysql+pymysql")).toBe("mysql+pymysql://u:p%40ss@db:3306/app");
+    const iam = MySQLSQLBackend.fromIamAuth({
+      host: "db",
+      port: 3306,
+      user: "u",
+      database: "app",
+      region: "eu-west-1",
+    });
+    expect(() => iam.sqlalchemyUrl()).toThrow(SQLAuthError);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -599,7 +720,53 @@ describe("MSSQLSQLBackend", () => {
     ).toBe("aad-token");
   });
 
-  it("rejects pooling under token auth", async () => {
+  it("rejects pooling under token auth (SQLConnectionError) while credential pooling works", async () => {
+    // Credential auth supports pooling: withConnection must succeed and build a
+    // pool config carrying min/max.
+    const pooled = MSSQLSQLBackend.fromCredentials({
+      server: "s",
+      database: "d",
+      username: "u",
+      password: "p",
+      pool: true,
+      poolMinSize: 3,
+      poolMaxSize: 9,
+    });
+    await expect(pooled.withConnection(async (c) => c)).resolves.toBeDefined();
+    expect(mssqlHarness.configs[0]!.pool).toEqual({ min: 3, max: 9 });
+
+    // Token auth cannot share a static pool. Construct a token-auth backend and
+    // force the pool path by flipping its private `pool` flag; ensurePool must
+    // throw SQLConnectionError BEFORE any ConnectionPool is constructed.
+    mssqlHarness.configs.length = 0;
+    const tokenBackend = MSSQLSQLBackend.fromEntraServicePrincipal({
+      server: "sql.example",
+      database: "app",
+      tenantId: "t",
+      clientId: "c",
+      clientSecret: "s",
+    });
+    (tokenBackend as unknown as { init: { pool: boolean } }).init.pool = true;
+    await expect(tokenBackend.withConnection(async (c) => c)).rejects.toBeInstanceOf(
+      SQLConnectionError,
+    );
+    // No pool/connection was created for the rejected token-auth path.
+    expect(mssqlHarness.configs.length).toBe(0);
+  });
+
+  it("maps a driver connect failure to SQLConnectionError", async () => {
+    mssqlHarness.connectError = new Error("login failed");
+    const backend = MSSQLSQLBackend.fromCredentials({
+      server: "sql.example",
+      database: "app",
+      username: "sa",
+      password: "secret",
+    });
+    await expect(backend.connect()).rejects.toBeInstanceOf(SQLConnectionError);
+  });
+
+  it("maps an Entra token-acquisition failure to SQLAuthError (not SQLConnectionError)", async () => {
+    azureHarness.tokenFail = true;
     const backend = MSSQLSQLBackend.fromEntraServicePrincipal({
       server: "sql.example",
       database: "app",
@@ -607,17 +774,11 @@ describe("MSSQLSQLBackend", () => {
       clientId: "c",
       clientSecret: "s",
     });
-    // Force the pool path by toggling the private flag via a fresh credential backend.
-    const pooled = MSSQLSQLBackend.fromCredentials({
-      server: "s",
-      database: "d",
-      username: "u",
-      password: "p",
-      pool: true,
-    });
-    await expect(pooled.withConnection(async (c) => c)).resolves.toBeDefined();
-    // token-auth backend has no pool support; calling connect still works
-    await expect(backend.connect()).resolves.toBeDefined();
+    // buildConfig() acquires the token; its failure must surface as SQLAuthError
+    // and not be re-wrapped as a connection error by connect()'s catch.
+    await expect(backend.connect()).rejects.toBeInstanceOf(SQLAuthError);
+    // The driver pool was never constructed (token failed before connect()).
+    expect(mssqlHarness.configs.length).toBe(0);
   });
 
   it("serverCertificate pinning throws (not implemented in TS)", async () => {
@@ -681,6 +842,40 @@ describe("OracleSQLBackend", () => {
       walletPassword: "wpw",
     });
   });
+
+  it("maps a driver connect failure to SQLConnectionError", async () => {
+    oracleHarness.connectError = new Error("ORA-12541: no listener");
+    const backend = OracleSQLBackend.fromCredentials({
+      host: "oracle.example",
+      username: "scott",
+      password: "tiger",
+      serviceName: "ORCLPDB1",
+    });
+    await expect(backend.connect()).rejects.toBeInstanceOf(SQLConnectionError);
+  });
+
+  it("withTimeout resolves when the connection beats the timeout", async () => {
+    const backend = OracleSQLBackend.fromCredentials({
+      host: "oracle.example",
+      username: "scott",
+      password: "tiger",
+      serviceName: "ORCLPDB1",
+    });
+    // getConnection resolves immediately; a generous timeout must not fire.
+    await expect(backend.connect(30)).resolves.toBeDefined();
+  });
+
+  it("withTimeout rejects with SQLConnectionError when the connection is too slow", async () => {
+    // getConnection never resolves; the (sub-)1ms timeout must win the race.
+    oracleHarness.hang = true;
+    const backend = OracleSQLBackend.fromCredentials({
+      host: "oracle.example",
+      username: "scott",
+      password: "tiger",
+      serviceName: "ORCLPDB1",
+    });
+    await expect(backend.connect(0.001)).rejects.toBeInstanceOf(SQLConnectionError);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -718,5 +913,35 @@ describe("DatabricksSQLBackend", () => {
     await backend.connect();
     expect(databricksHarness.connectOptions[0].host).toBe("dbc.example.com:8443");
     expect(databricksHarness.sessionOptions[0]).toBeUndefined();
+  });
+
+  it("maps a connect failure to SQLConnectionError", async () => {
+    databricksHarness.connectError = new Error("403 invalid token");
+    const backend = DatabricksSQLBackend.fromToken({
+      host: "dbc.example.com",
+      httpPath: "/sql",
+      token: "bad",
+    });
+    await expect(backend.connect()).rejects.toBeInstanceOf(SQLConnectionError);
+  });
+
+  it("withTimeout resolves when the session opens before the timeout", async () => {
+    const backend = DatabricksSQLBackend.fromToken({
+      host: "dbc.example.com",
+      httpPath: "/sql",
+      token: "t",
+    });
+    await expect(backend.connect(30)).resolves.toBeDefined();
+  });
+
+  it("withTimeout rejects with SQLConnectionError when opening the session is too slow", async () => {
+    // openSession never resolves; the (sub-)1ms timeout must win the race.
+    databricksHarness.sessionHang = true;
+    const backend = DatabricksSQLBackend.fromToken({
+      host: "dbc.example.com",
+      httpPath: "/sql",
+      token: "t",
+    });
+    await expect(backend.connect(0.001)).rejects.toBeInstanceOf(SQLConnectionError);
   });
 });
