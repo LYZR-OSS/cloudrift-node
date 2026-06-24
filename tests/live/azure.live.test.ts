@@ -12,7 +12,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BlobServiceClient } from "@azure/storage-blob";
 
 import { getStorage, getSecrets, getPubsub, getQueue } from "../../src/index.js";
-import { env, liveLog, requireEnv, uniqueName } from "./env.js";
+import {
+  AZURE_SB_SESSION_PRESENT,
+  env,
+  getAzureServiceBusSessionConfig,
+  liveLog,
+  requireEnv,
+  uniqueName,
+} from "./env.js";
 
 /* ================================================================== */
 /* Blob                                                               */
@@ -250,5 +257,146 @@ describe.skipIf(!SERVICEBUS_PRESENT)("Azure Service Bus live lifecycle", () => {
       queueName: env("CLOUDRIFT_LIVE_AZURE_SERVICEBUS_QUEUE")!,
       marker,
     });
+  });
+});
+
+/* ================================================================== */
+/* Service Bus — sessions (FIFO-style)                                */
+/* ================================================================== */
+/*
+ * Gated on CLOUDRIFT_LIVE_AZURE_SB_SESSION_QUEUE, a PRE-EXISTING session-enabled
+ * queue (reusing the Service Bus connection string). The queue is NOT created
+ * here: `requiresSession` is a creation-time property, so we assume the operator
+ * provisioned a session-enabled queue. Each test uses a fresh, unique sessionId
+ * (groupId) so independent runs never read each other's messages, and every
+ * received message is settled (delete/nack/deadLetter) so nothing leaks into the
+ * next run.
+ */
+
+describe.skipIf(!AZURE_SB_SESSION_PRESENT)("Azure Service Bus session live lifecycle", () => {
+  const log = liveLog("azure:servicebus-session");
+  const { connectionString, sessionQueue } = getAzureServiceBusSessionConfig();
+  let backend: Awaited<ReturnType<typeof getQueue>> | undefined;
+
+  beforeAll(async () => {
+    log.step("initializing backend", {
+      provider: "azure_service_bus",
+      queueName: sessionQueue!,
+      sessionEnabled: true,
+    });
+    backend = await getQueue("azure_service_bus", {
+      connectionString: connectionString!,
+      queueName: sessionQueue!,
+      sessionEnabled: true,
+    });
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.close();
+      log.step("closed backend", { queueName: sessionQueue! });
+    } catch (err) {
+      log.warn("backend close failed", err, { queueName: sessionQueue! });
+    }
+  });
+
+  it("sends with a sessionId and receives that session round-trip", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+
+    const sessionId = uniqueName("sb-session");
+    const marker = uniqueName("sb-session-msg");
+    log.step("sending session message", { queueName: sessionQueue!, sessionId, marker });
+    await b.send({ marker }, 0, { groupId: sessionId });
+
+    // Accept the exact session we just wrote to (bounded wait via API maxWaitTime).
+    log.step("receiving session message", { queueName: sessionQueue!, sessionId, waitSeconds: 20 });
+    const received = await b.receive(1, 20, { groupId: sessionId });
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const msg = received[0];
+    expect(msg.body).toEqual({ marker });
+    // The backend echoes the Service Bus sessionId back as groupId.
+    expect(msg.groupId).toBe(sessionId);
+    log.step("received session message", { queueName: sessionQueue!, sessionId, marker });
+
+    await b.delete(msg.receiptHandle);
+    log.step("completed session message", { queueName: sessionQueue!, sessionId, marker });
+  });
+
+  it("nack abandons a session message so it is redelivered with a higher receiveCount", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+
+    const sessionId = uniqueName("sb-session-nack");
+    const marker = uniqueName("sb-session-nack-msg");
+    log.step("sending session message for nack", { queueName: sessionQueue!, sessionId, marker });
+    await b.send({ marker }, 0, { groupId: sessionId });
+
+    const first = await b.receive(1, 20, { groupId: sessionId });
+    expect(first.length).toBeGreaterThanOrEqual(1);
+    const firstMsg = first[0];
+    expect(firstMsg.body).toEqual({ marker });
+    const firstCount = firstMsg.receiveCount ?? 1;
+    log.step("abandoning session message", { queueName: sessionQueue!, sessionId, firstCount });
+    await b.nack(firstMsg.receiptHandle);
+
+    // After abandon, the same session yields the message again with a bumped delivery count.
+    const second = await b.receive(1, 20, { groupId: sessionId });
+    expect(second.length).toBeGreaterThanOrEqual(1);
+    const secondMsg = second[0];
+    expect(secondMsg.body).toEqual({ marker });
+    expect(secondMsg.groupId).toBe(sessionId);
+    expect(secondMsg.receiveCount ?? 1).toBeGreaterThan(firstCount);
+    log.step("redelivered session message", {
+      queueName: sessionQueue!,
+      sessionId,
+      secondCount: secondMsg.receiveCount ?? 1,
+    });
+
+    // Settle so the message does not linger for the next run.
+    await b.delete(secondMsg.receiptHandle);
+    log.step("completed redelivered session message", { queueName: sessionQueue!, sessionId });
+  });
+
+  it("deadLetters a session message off the active queue", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+
+    const sessionId = uniqueName("sb-session-dlq");
+    const marker = uniqueName("sb-session-dlq-msg");
+    log.step("sending session message for deadLetter", {
+      queueName: sessionQueue!,
+      sessionId,
+      marker,
+    });
+    await b.send({ marker }, 0, { groupId: sessionId });
+
+    const received = await b.receive(1, 20, { groupId: sessionId });
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const msg = received[0];
+    expect(msg.body).toEqual({ marker });
+
+    log.step("dead-lettering session message", { queueName: sessionQueue!, sessionId, marker });
+    await b.deadLetter(msg.receiptHandle, "cloudrift-live-session-dlq");
+
+    // The message is now on the dead-letter sub-queue, not the active session.
+    const after = await b.receive(1, 5, { groupId: sessionId });
+    expect(after.length).toBe(0);
+    log.step("verified session active queue empty after deadLetter", {
+      queueName: sessionQueue!,
+      sessionId,
+    });
+  });
+
+  it("reports a non-negative active message depth for the session queue", async () => {
+    expect(backend).toBeDefined();
+    const b = backend!;
+
+    log.step("querying session queue depth", { queueName: sessionQueue! });
+    const depth = await b.getQueueDepth();
+    expect(typeof depth).toBe("number");
+    expect(depth).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(depth)).toBe(true);
+    log.step("session queue depth", { queueName: sessionQueue!, depth });
   });
 });
