@@ -98,6 +98,30 @@ const SQS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("sqs");
 const SNS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("sns");
 const SECRETS_PRESENT = AWS_AUTH_PRESENT && awsServiceEnabled("secrets");
 
+/**
+ * Poll `getQueueDepth()` until it equals `target` or the deadline passes, then
+ * return the last observed depth for the caller to assert on.
+ *
+ * SQS `ApproximateNumberOfMessages` is eventually consistent in BOTH directions:
+ * it lags behind a burst of sends (a read right after sending can still see 0)
+ * and behind consumption. A single read is therefore inherently racy; polling to
+ * convergence is the correct way to observe steady state without flaking.
+ */
+async function pollQueueDepth(
+  backend: { getQueueDepth: () => Promise<number> },
+  target: number,
+  timeoutMs = 30_000,
+  intervalMs = 1_000,
+): Promise<number> {
+  const start = Date.now();
+  let depth = await backend.getQueueDepth();
+  while (depth !== target && Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    depth = await backend.getQueueDepth();
+  }
+  return depth;
+}
+
 /* ================================================================== */
 /* S3                                                                 */
 /* ================================================================== */
@@ -706,11 +730,17 @@ describe.skipIf(!SQS_PRESENT)("AWS SQS getQueueDepth live lifecycle", () => {
     }
   });
 
-  it("reports 0 on an empty queue then reflects N enqueued messages", async () => {
+  // retry:0 overrides the live lane's global retry:2. A retry would reuse this
+  // describe's queue (created once in beforeAll), so messages sent by a failed
+  // attempt would still be present and break the "starts empty" assertion. This
+  // test instead absorbs eventual-consistency lag internally via pollQueueDepth.
+  it("reports 0 on an empty queue then reflects N enqueued messages", { retry: 0 }, async () => {
     expect(backend).toBeDefined();
     const b = backend!;
 
-    const initial = await b.getQueueDepth();
+    // A brand-new queue starts empty, but ApproximateNumberOfMessages can lag;
+    // poll rather than read once.
+    const initial = await pollQueueDepth(b, 0);
     expect(initial).toBe(0);
     log.step("initial depth", { depth: initial });
 
@@ -721,9 +751,9 @@ describe.skipIf(!SQS_PRESENT)("AWS SQS getQueueDepth live lifecycle", () => {
     }
     log.step("sent messages", { n });
 
-    // ApproximateNumberOfMessages is eventually consistent; the live lane's
-    // retry:2 absorbs transient under-counts.
-    const depth = await b.getQueueDepth();
+    // ApproximateNumberOfMessages lags a burst of sends — a single read can
+    // still observe 0. Poll until it converges to n.
+    const depth = await pollQueueDepth(b, n);
     expect(depth).toBe(n);
     log.step("depth after sends", { depth });
   });
