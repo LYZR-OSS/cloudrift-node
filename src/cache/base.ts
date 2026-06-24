@@ -21,13 +21,34 @@ export interface CachePipeline {
   get(key: string): this;
   delete(...keys: string[]): this;
   incr(key: string): this;
+  /** Queue an `expire` with optional `nx`/`xx` flags. */
+  expire(key: string, seconds: number, opts?: { nx?: boolean; xx?: boolean }): this;
+  /** Queue a set-add. */
+  sadd(key: string, ...members: CacheValue[]): this;
+  /** Queue a set-remove. */
+  srem(key: string, ...members: CacheValue[]): this;
   /** Execute the queued commands. Returns one entry per queued command. */
   exec(): Promise<unknown[]>;
 }
 
+/** Options controlling how `expire` sets a TTL. `nx` and `xx` are mutually exclusive. */
+export interface ExpireOptions {
+  /** Only set the TTL if the key has no existing TTL. */
+  nx?: boolean;
+  /** Only set the TTL if the key already has a TTL. */
+  xx?: boolean;
+}
+
+/**
+ * A value returned by read operations. `Buffer` by default; `string` when the
+ * backend was constructed with `decodeResponses: true` (mirrors redis-py's
+ * `decode_responses`).
+ */
+export type CacheReadValue = Buffer | string;
+
 export abstract class CacheBackend {
   /** Return the value for `key`, or `null` if it does not exist. */
-  abstract get(key: string): Promise<Buffer | null>;
+  abstract get(key: string): Promise<CacheReadValue | null>;
 
   /**
    * Set `key` to `value`. `ttl` is the expiry in seconds (`undefined` = no
@@ -48,8 +69,14 @@ export abstract class CacheBackend {
   /** Return `true` if `key` exists. */
   abstract exists(key: string): Promise<boolean>;
 
-  /** Set a timeout on `key`. Returns `true` if the timeout was set. */
-  abstract expire(key: string, seconds: number): Promise<boolean>;
+  /**
+   * Set a timeout on `key`. Returns `true` if the timeout was set.
+   *
+   * `nx` only sets the TTL when the key has no existing TTL; `xx` only when it
+   * already has one. They are mutually exclusive (passing both throws
+   * `CloudRiftError`).
+   */
+  abstract expire(key: string, seconds: number, opts?: ExpireOptions): Promise<boolean>;
 
   /** Return remaining TTL in seconds. -1 = no expiry, -2 = key missing. */
   abstract ttl(key: string): Promise<number>;
@@ -57,17 +84,60 @@ export abstract class CacheBackend {
   /** Return all keys matching `pattern` (default `"*"`). */
   abstract keys(pattern?: string): Promise<string[]>;
 
+  /**
+   * Incremental keyspace iteration. Returns `[nextCursor, keys]`; iterate until
+   * `nextCursor === 0`. Preferred over `keys()` in production (bounded per-call
+   * work). Keys are returned as raw bytes (`Buffer`).
+   */
+  abstract scan(
+    cursor?: number,
+    match?: string,
+    count?: number,
+  ): Promise<[number, CacheReadValue[]]>;
+
+  /**
+   * Atomically get and delete `key`. Returns the value, or `null` if the key
+   * did not exist. Requires Redis >= 6.2.
+   */
+  abstract getdel(key: string): Promise<CacheReadValue | null>;
+
   /** Return the value of `field` in the hash stored at `key`. */
-  abstract hget(key: string, field: string): Promise<Buffer | null>;
+  abstract hget(key: string, field: string): Promise<CacheReadValue | null>;
 
   /** Set `field` in the hash at `key`. Returns 1 if new, 0 if updated. */
   abstract hset(key: string, field: string, value: CacheValue): Promise<number>;
 
   /** Return all fields and values of the hash at `key`. */
-  abstract hgetall(key: string): Promise<Record<string, Buffer>>;
+  abstract hgetall(key: string): Promise<Record<string, CacheReadValue>>;
 
   /** Delete fields from the hash at `key`. Returns number of fields removed. */
   abstract hdel(key: string, ...fields: string[]): Promise<number>;
+
+  /**
+   * Add one or more `members` to the set at `key`. Returns the number of
+   * members that were newly added (i.e. not already present).
+   */
+  abstract sadd(key: string, ...members: CacheValue[]): Promise<number>;
+
+  /** Remove one or more `members` from the set at `key`. Returns the number removed. */
+  abstract srem(key: string, ...members: CacheValue[]): Promise<number>;
+
+  /** Return the number of elements in the set at `key`. */
+  abstract scard(key: string): Promise<number>;
+
+  /** Return `true` if `member` is in the set at `key`. */
+  abstract sismember(key: string, member: CacheValue): Promise<boolean>;
+
+  /** Return all members of the set at `key`. */
+  abstract smembers(key: string): Promise<CacheReadValue[]>;
+
+  /**
+   * Return the members common to all sets at `keys` (set intersection). With a
+   * single key this is equivalent to `smembers`. A missing key is treated as an
+   * empty set, so any missing key yields an empty result. Requires at least one
+   * key (zero keys throws `CloudRiftError`).
+   */
+  abstract sinter(...keys: string[]): Promise<CacheReadValue[]>;
 
   /** Prepend values to the list at `key`. Returns new list length. */
   abstract lpush(key: string, ...values: CacheValue[]): Promise<number>;
@@ -76,7 +146,7 @@ export abstract class CacheBackend {
   abstract rpush(key: string, ...values: CacheValue[]): Promise<number>;
 
   /** Return the slice [`start`, `stop`] of the list at `key`. */
-  abstract lrange(key: string, start: number, stop: number): Promise<Buffer[]>;
+  abstract lrange(key: string, start: number, stop: number): Promise<CacheReadValue[]>;
 
   /** Return the length of the list at `key`. */
   abstract llen(key: string): Promise<number>;
@@ -88,7 +158,7 @@ export abstract class CacheBackend {
   abstract decr(key: string): Promise<number>;
 
   /** Return values for multiple keys at once. */
-  abstract mget(...keys: string[]): Promise<Array<Buffer | null>>;
+  abstract mget(...keys: string[]): Promise<Array<CacheReadValue | null>>;
 
   /** Set multiple key-value pairs at once. */
   abstract mset(mapping: Record<string, CacheValue>): Promise<void>;

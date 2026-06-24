@@ -44,7 +44,13 @@ export {
   AzureServiceBusBackend,
   getQueue,
 } from "./messaging/index.js";
-export type { Message, QueueProvider } from "./messaging/index.js";
+export type {
+  Message,
+  QueueProvider,
+  SendOptions as MessagingSendOptions,
+  SendBatchOptions,
+  ReceiveOptions,
+} from "./messaging/index.js";
 
 // --- cache ---
 export {
@@ -55,12 +61,16 @@ export {
   AzureRedisCacheBackend,
   generateElastiCacheIamToken,
   getCache,
+  cacheBrokerUrl,
 } from "./cache/index.js";
 export type {
   CacheValue,
+  CacheReadValue,
   CachePipeline,
   CacheProvider,
   CacheAuthMethod,
+  ExpireOptions,
+  SslCertReqs,
   IamTokenParams,
 } from "./cache/index.js";
 
@@ -69,6 +79,9 @@ export {
   SecretBackend,
   AWSSecretsManagerBackend,
   AzureKeyVaultBackend,
+  EnvSecretBackend,
+  FileSecretBackend,
+  MappingSecretBackend,
   getSecrets,
 } from "./secrets/index.js";
 export type { SecretsProvider } from "./secrets/index.js";
@@ -89,3 +102,60 @@ export {
   setCosmosClientConstructor,
 } from "./document/index.js";
 export type { DocumentProvider, MongoClientConstructor, PoolOptions } from "./document/index.js";
+
+// --- email ---
+export {
+  EmailBackend,
+  AWSSESBackend,
+  AzureACSEmailBackend,
+  SMTPEmailBackend,
+  getEmail,
+} from "./email/index.js";
+export type {
+  EmailProvider,
+  Attachment,
+  EmailMessage,
+  SendOptions as EmailSendOptions,
+  SesClientOptions,
+  SesAccessKeyOptions,
+  SesIamRoleOptions,
+  SesProfileOptions,
+  AcsConnectionStringOptions,
+  AcsManagedIdentityOptions,
+  AcsServicePrincipalOptions,
+  SmtpBaseOptions,
+  SmtpAuthOptions,
+} from "./email/index.js";
+
+// --- sql ---
+export {
+  SQLBackend,
+  PostgresSQLBackend,
+  RedshiftSQLBackend,
+  MySQLSQLBackend,
+  MSSQLSQLBackend,
+  OracleSQLBackend,
+  DatabricksSQLBackend,
+  getSql,
+  parseSqlUrl,
+  buildSqlalchemyUrl,
+  validatePinnedCertificate,
+} from "./sql/index.js";
+export type {
+  SqlConnection,
+  SqlProvider,
+  PostgresCredentialsOptions,
+  PostgresUrlOptions,
+  PostgresIamAuthOptions,
+  MySqlCredentialsOptions,
+  MySqlUrlOptions,
+  MySqlIamAuthOptions,
+  MssqlCredentialsOptions,
+  MssqlServicePrincipalOptions,
+  MssqlManagedIdentityOptions,
+  TokenProvider,
+  OracleCredentialsOptions,
+  DatabricksTokenOptions,
+  ParsedSqlUrl,
+  SqlalchemyUrlParts,
+} from "./sql/index.js";

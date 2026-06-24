@@ -10,6 +10,8 @@ export default defineConfig({
     "secrets/index": "src/secrets/index.ts",
     "pubsub/index": "src/pubsub/index.ts",
     "document/index": "src/document/index.ts",
+    "email/index": "src/email/index.ts",
+    "sql/index": "src/sql/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

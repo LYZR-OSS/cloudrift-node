@@ -6,6 +6,8 @@ import {
   SendMessageBatchCommand,
   ReceiveMessageCommand,
   DeleteMessageCommand,
+  ChangeMessageVisibilityCommand,
+  GetQueueUrlCommand,
   PurgeQueueCommand,
   GetQueueAttributesCommand,
 } from "@aws-sdk/client-sqs";
@@ -13,7 +15,12 @@ import {
 import { getQueue } from "../src/messaging/index.js";
 import { AWSSQSBackend } from "../src/messaging/sqs.js";
 import { AzureServiceBusBackend } from "../src/messaging/azureBus.js";
-import { MessageSendError, MessagingError, QueueNotFoundError } from "../src/core/errors.js";
+import {
+  FeatureNotSupportedError,
+  MessageSendError,
+  MessagingError,
+  QueueNotFoundError,
+} from "../src/core/errors.js";
 import { MessagingBackend as MessagingBackendBase } from "../src/messaging/base.js";
 import type { MessagingBackend, Message } from "../src/messaging/base.js";
 
@@ -55,6 +62,12 @@ class MinimalMessagingBackend extends MessagingBackendBase {
   delete(): Promise<void> {
     return Promise.resolve();
   }
+  deadLetter(): Promise<void> {
+    return Promise.resolve();
+  }
+  getQueueDepth(): Promise<number> {
+    return Promise.resolve(0);
+  }
   purge(): Promise<void> {
     return Promise.resolve();
   }
@@ -76,6 +89,12 @@ describe("MessagingBackend base defaults", () => {
     const spy = vi.spyOn(b, "close");
     await b[Symbol.asyncDispose]();
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("nack defaults to rejecting with FeatureNotSupportedError naming the backend", async () => {
+    const b = new MinimalMessagingBackend();
+    await expect(b.nack("rh")).rejects.toBeInstanceOf(FeatureNotSupportedError);
+    await expect(b.nack("rh")).rejects.toThrow("MinimalMessagingBackend does not support nack()");
   });
 });
 
@@ -107,8 +126,10 @@ describe("AWSSQSBackend", () => {
     expect(calls[0].args[0].input).toMatchObject({
       QueueUrl: QUEUE_URL,
       MessageBody: JSON.stringify({ action: "greet", name: "cloudrift" }),
-      DelaySeconds: 0,
     });
+    // Matches Python e643def: a zero delay omits DelaySeconds entirely
+    // (only FIFO/standard params are added when non-empty).
+    expect(calls[0].args[0].input.DelaySeconds).toBeUndefined();
   });
 
   it("send passes DelaySeconds through", async () => {
@@ -437,6 +458,346 @@ describe("AWSSQSBackend", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* AWSSQSBackend FIFO + dead-letter + depth (Python e643def/8de15b0)    */
+/* ------------------------------------------------------------------ */
+
+const FIFO_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue.fifo";
+
+function makeFifoBackend(): AWSSQSBackend {
+  return AWSSQSBackend.fromAccessKey({
+    queueUrl: FIFO_QUEUE_URL,
+    awsAccessKeyId: "test",
+    awsSecretAccessKey: "test",
+    region: "us-east-1",
+  });
+}
+
+describe("AWSSQSBackend FIFO + dead-letter + depth", () => {
+  let backend: AWSSQSBackend;
+
+  beforeEach(() => {
+    sqsMock.reset();
+    backend = makeBackend() as AWSSQSBackend;
+  });
+
+  afterEach(async () => {
+    await backend.close();
+  });
+
+  it("send rejects groupId/dedupId on a standard (non-FIFO) queue", async () => {
+    await expect(backend.send({ a: 1 }, 0, { groupId: "g" })).rejects.toBeInstanceOf(
+      FeatureNotSupportedError,
+    );
+  });
+
+  it("FIFO send requires groupId and forwards MessageGroupId/DeduplicationId", async () => {
+    const fifo = makeFifoBackend();
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: "f-1" });
+
+    await expect(fifo.send({ a: 1 })).rejects.toBeInstanceOf(MessageSendError);
+
+    const id = await fifo.send({ a: 1 }, 0, { groupId: "grp", dedupId: "dd" });
+    expect(id).toBe("f-1");
+    const calls = sqsMock.commandCalls(SendMessageCommand);
+    expect(calls[0].args[0].input).toMatchObject({
+      MessageGroupId: "grp",
+      MessageDeduplicationId: "dd",
+    });
+    expect(calls[0].args[0].input.DelaySeconds).toBeUndefined();
+    await fifo.close();
+  });
+
+  it("FIFO send rejects a per-message delay", async () => {
+    const fifo = makeFifoBackend();
+    await expect(fifo.send({ a: 1 }, 5, { groupId: "g" })).rejects.toBeInstanceOf(
+      FeatureNotSupportedError,
+    );
+    await fifo.close();
+  });
+
+  it("standard send omits DelaySeconds when delay is 0 and includes it otherwise", async () => {
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: "x" });
+    await backend.send({ a: 1 }, 0);
+    await backend.send({ a: 1 }, 7);
+    const calls = sqsMock.commandCalls(SendMessageCommand);
+    expect(calls[0].args[0].input.DelaySeconds).toBeUndefined();
+    expect(calls[1].args[0].input.DelaySeconds).toBe(7);
+  });
+
+  it("FIFO sendBatch threads groupId and parallel dedupIds onto each entry", async () => {
+    const fifo = makeFifoBackend();
+    sqsMock.on(SendMessageBatchCommand).resolves({
+      Successful: [
+        { Id: "0", MessageId: "a", MD5OfMessageBody: "x" },
+        { Id: "1", MessageId: "b", MD5OfMessageBody: "y" },
+      ],
+    });
+
+    const ids = await fifo.sendBatch([{ n: 1 }, { n: 2 }], {
+      groupId: "grp",
+      dedupIds: ["d0", "d1"],
+    });
+    expect(ids).toEqual(["a", "b"]);
+    const entries = sqsMock.commandCalls(SendMessageBatchCommand)[0].args[0].input.Entries!;
+    expect(entries[0]).toMatchObject({ MessageGroupId: "grp", MessageDeduplicationId: "d0" });
+    expect(entries[1]).toMatchObject({ MessageGroupId: "grp", MessageDeduplicationId: "d1" });
+    await fifo.close();
+  });
+
+  it("sendBatch rejects when dedupIds length does not match messages", async () => {
+    const fifo = makeFifoBackend();
+    await expect(
+      fifo.sendBatch([{ n: 1 }, { n: 2 }], { groupId: "g", dedupIds: ["only-one"] }),
+    ).rejects.toThrow("dedupIds must be parallel to messages");
+    await fifo.close();
+  });
+
+  it("receive surfaces groupId/dedupId/receiveCount from message attributes", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [
+        {
+          MessageId: "m1",
+          Body: JSON.stringify({ n: 1 }),
+          ReceiptHandle: "rh-1",
+          Attributes: {
+            MessageGroupId: "grp",
+            MessageDeduplicationId: "dd",
+            ApproximateReceiveCount: "3",
+          },
+        },
+      ],
+    });
+
+    const [msg] = await backend.receive(1, 0);
+    expect(msg.groupId).toBe("grp");
+    expect(msg.dedupId).toBe("dd");
+    expect(msg.receiveCount).toBe(3);
+  });
+
+  it("receive leaves FIFO fields undefined when attributes are absent", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: "{}", ReceiptHandle: "rh", Attributes: {} }],
+    });
+    const [msg] = await backend.receive(1, 0);
+    expect(msg.groupId).toBeUndefined();
+    expect(msg.dedupId).toBeUndefined();
+    expect(msg.receiveCount).toBeUndefined();
+  });
+
+  it("receive forwards VisibilityTimeout only when provided", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({});
+    await backend.receive(1, 0);
+    await backend.receive(1, 0, { visibilityTimeout: 45 });
+    const calls = sqsMock.commandCalls(ReceiveMessageCommand);
+    expect(calls[0].args[0].input.VisibilityTimeout).toBeUndefined();
+    expect(calls[1].args[0].input.VisibilityTimeout).toBe(45);
+  });
+
+  it("receive rejects a groupId filter (SQS cannot select a group)", async () => {
+    await expect(backend.receive(1, 0, { groupId: "g" })).rejects.toBeInstanceOf(
+      FeatureNotSupportedError,
+    );
+  });
+
+  it("nack sets VisibilityTimeout to 0 and clears pending", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: JSON.stringify({ n: 1 }), ReceiptHandle: "rh-n" }],
+    });
+    sqsMock.on(ChangeMessageVisibilityCommand).resolves({});
+    await backend.receive(1, 0);
+
+    await backend.nack("rh-n");
+
+    const calls = sqsMock.commandCalls(ChangeMessageVisibilityCommand);
+    expect(calls[0].args[0].input).toMatchObject({
+      QueueUrl: QUEUE_URL,
+      ReceiptHandle: "rh-n",
+      VisibilityTimeout: 0,
+    });
+    // deadLetter after nack -> no pending body retained
+    await expect(backend.deadLetter("rh-n", "late")).rejects.toThrow(/No pending message/);
+  });
+
+  it("deadLetter re-sends the retained body to an explicit DLQ then deletes the original", async () => {
+    const dlqUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/dlq";
+    const b = AWSSQSBackend.fromAccessKey({
+      queueUrl: QUEUE_URL,
+      awsAccessKeyId: "t",
+      awsSecretAccessKey: "t",
+      region: "us-east-1",
+      dlqUrl,
+    });
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: JSON.stringify({ payload: 9 }), ReceiptHandle: "rh-dl" }],
+    });
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: "dlq-1" });
+    sqsMock.on(DeleteMessageCommand).resolves({});
+
+    await b.receive(1, 0);
+    await b.deadLetter("rh-dl", "poison");
+
+    const send = sqsMock.commandCalls(SendMessageCommand)[0].args[0].input;
+    expect(send.QueueUrl).toBe(dlqUrl);
+    expect(send.MessageBody).toBe(JSON.stringify({ payload: 9 }));
+    expect(send.MessageAttributes).toMatchObject({
+      DeadLetterReason: { DataType: "String", StringValue: "poison" },
+    });
+    expect(sqsMock.commandCalls(DeleteMessageCommand)[0].args[0].input).toMatchObject({
+      QueueUrl: QUEUE_URL,
+      ReceiptHandle: "rh-dl",
+    });
+    // pending cleared on success
+    await expect(b.deadLetter("rh-dl", "again")).rejects.toThrow(/No pending message/);
+    await b.close();
+  });
+
+  it("deadLetter clears pending even when the DLQ send fails (any outcome)", async () => {
+    const b = AWSSQSBackend.fromAccessKey({
+      queueUrl: QUEUE_URL,
+      awsAccessKeyId: "t",
+      awsSecretAccessKey: "t",
+      region: "us-east-1",
+      dlqUrl: "https://sqs.us-east-1.amazonaws.com/123456789012/dlq",
+    });
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: "{}", ReceiptHandle: "rh-fail" }],
+    });
+    sqsMock.on(SendMessageCommand).rejects(new Error("dlq down"));
+    await b.receive(1, 0);
+
+    await expect(b.deadLetter("rh-fail", "x")).rejects.toBeInstanceOf(MessagingError);
+    // pending was cleared in finally -> a retry now reports no pending message
+    await expect(b.deadLetter("rh-fail", "x")).rejects.toThrow(/No pending message/);
+    await b.close();
+  });
+
+  it("deadLetter without a retained body throws MessagingError", async () => {
+    await expect(backend.deadLetter("never-received", "x")).rejects.toThrow(/No pending message/);
+  });
+
+  it("deadLetter PRESERVES the pending body when DLQ resolution fails (sqs.ts deadLetter)", async () => {
+    // No explicit dlqUrl -> deadLetter must resolve from RedrivePolicy. If that
+    // GetQueueAttributes call fails, the body must survive for a retry. Python
+    // (sqs.py:298-311) resolves the DLQ url OUTSIDE the try/finally.
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [
+        { MessageId: "m", Body: JSON.stringify({ payload: 7 }), ReceiptHandle: "rh-keep" },
+      ],
+    });
+    // First resolution attempt fails; second succeeds via RedrivePolicy.
+    const dlqUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/recovered-dlq";
+    sqsMock
+      .on(GetQueueAttributesCommand)
+      .rejectsOnce(new Error("attributes unavailable"))
+      .resolves({
+        Attributes: {
+          RedrivePolicy: JSON.stringify({
+            deadLetterTargetArn: "arn:aws:sqs:us-east-1:123456789012:recovered-dlq",
+            maxReceiveCount: 5,
+          }),
+        },
+      });
+    sqsMock.on(GetQueueUrlCommand).resolves({ QueueUrl: dlqUrl });
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: "x" });
+    sqsMock.on(DeleteMessageCommand).resolves({});
+
+    await backend.receive(1, 0);
+
+    // First attempt: resolution fails -> error surfaces, body NOT cleared.
+    await expect(backend.deadLetter("rh-keep", "boom")).rejects.toThrow(/attributes unavailable/);
+
+    // Retry: resolution now succeeds and the retained body is sent to the DLQ.
+    await backend.deadLetter("rh-keep", "boom");
+    const send = sqsMock.commandCalls(SendMessageCommand)[0].args[0].input;
+    expect(send.QueueUrl).toBe(dlqUrl);
+    expect(send.MessageBody).toBe(JSON.stringify({ payload: 7 }));
+    // body cleared only after the successful send+delete.
+    await expect(backend.deadLetter("rh-keep", "again")).rejects.toThrow(/No pending message/);
+  });
+
+  it("deadLetter resolves the DLQ url from the source queue RedrivePolicy when not configured", async () => {
+    const dlqUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/derived-dlq";
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: "{}", ReceiptHandle: "rh-r" }],
+    });
+    sqsMock.on(GetQueueAttributesCommand).resolves({
+      Attributes: {
+        RedrivePolicy: JSON.stringify({
+          deadLetterTargetArn: "arn:aws:sqs:us-east-1:123456789012:derived-dlq",
+          maxReceiveCount: 5,
+        }),
+      },
+    });
+    sqsMock.on(GetQueueUrlCommand).resolves({ QueueUrl: dlqUrl });
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: "x" });
+    sqsMock.on(DeleteMessageCommand).resolves({});
+
+    await backend.receive(1, 0);
+    await backend.deadLetter("rh-r", "boom");
+
+    expect(sqsMock.commandCalls(GetQueueUrlCommand)[0].args[0].input).toMatchObject({
+      QueueName: "derived-dlq",
+    });
+    expect(sqsMock.commandCalls(SendMessageCommand)[0].args[0].input.QueueUrl).toBe(dlqUrl);
+  });
+
+  it("deadLetter throws when no DLQ is configured and no RedrivePolicy exists", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: "{}", ReceiptHandle: "rh-no" }],
+    });
+    sqsMock.on(GetQueueAttributesCommand).resolves({ Attributes: {} });
+    await backend.receive(1, 0);
+    await expect(backend.deadLetter("rh-no", "x")).rejects.toThrow(
+      /No dead-letter queue configured/,
+    );
+  });
+
+  it("getQueueDepth parses ApproximateNumberOfMessages", async () => {
+    sqsMock.on(GetQueueAttributesCommand).resolves({
+      Attributes: { ApproximateNumberOfMessages: "42" },
+    });
+    expect(await backend.getQueueDepth()).toBe(42);
+    expect(sqsMock.commandCalls(GetQueueAttributesCommand)[0].args[0].input).toMatchObject({
+      QueueUrl: QUEUE_URL,
+      AttributeNames: ["ApproximateNumberOfMessages"],
+    });
+  });
+
+  it("getQueueDepth throws MessagingError when ApproximateNumberOfMessages is absent", async () => {
+    // Python (sqs.py:320) indexes the attribute directly -> KeyError when
+    // missing. Node must raise a domain error rather than returning NaN.
+    sqsMock.on(GetQueueAttributesCommand).resolves({ Attributes: {} });
+    await expect(backend.getQueueDepth()).rejects.toBeInstanceOf(MessagingError);
+    await expect(backend.getQueueDepth()).rejects.toThrow(/ApproximateNumberOfMessages/);
+  });
+
+  it("getQueueDepth throws when Attributes is entirely absent", async () => {
+    sqsMock.on(GetQueueAttributesCommand).resolves({});
+    await expect(backend.getQueueDepth()).rejects.toBeInstanceOf(MessagingError);
+  });
+
+  it("delete clears the retained pending body", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: "{}", ReceiptHandle: "rh-del" }],
+    });
+    sqsMock.on(DeleteMessageCommand).resolves({});
+    await backend.receive(1, 0);
+    await backend.delete("rh-del");
+    await expect(backend.deadLetter("rh-del", "x")).rejects.toThrow(/No pending message/);
+  });
+
+  it("purge clears retained pending bodies", async () => {
+    sqsMock.on(ReceiveMessageCommand).resolves({
+      Messages: [{ MessageId: "m", Body: "{}", ReceiptHandle: "rh-p" }],
+    });
+    sqsMock.on(PurgeQueueCommand).resolves({});
+    await backend.receive(1, 0);
+    await backend.purge();
+    await expect(backend.deadLetter("rh-p", "x")).rejects.toThrow(/No pending message/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* Azure Service Bus — driven through a mocked @azure/service-bus SDK   */
 /* ------------------------------------------------------------------ */
 
@@ -445,6 +806,8 @@ describe("AWSSQSBackend", () => {
 class FakeReceiver {
   closed = false;
   completed: unknown[] = [];
+  abandoned: unknown[] = [];
+  deadLettered: Array<{ message: unknown; options: unknown }> = [];
   // Records [maxMessages, options] for each receiveMessages() call.
   receiveCalls: Array<{ maxMessages: unknown; options: unknown }> = [];
   // When set, receiveMessages rejects with this error before draining.
@@ -473,6 +836,14 @@ class FakeReceiver {
       throw this.failComplete;
     }
     this.completed.push(msg);
+  }
+
+  async abandonMessage(msg: unknown): Promise<void> {
+    this.abandoned.push(msg);
+  }
+
+  async deadLetterMessage(msg: unknown, options?: unknown): Promise<void> {
+    this.deadLettered.push({ message: msg, options });
   }
 
   async close(): Promise<void> {
@@ -538,6 +909,16 @@ const sbHarness: {
   // When set, the next created sender/receiver is armed to fail with this error.
   nextSenderFailSend?: unknown;
   nextReceiverFailReceive?: unknown;
+  // Records acceptSession/acceptNextSession calls.
+  acceptSessionCalls: Array<{ queueName: unknown; sessionId: unknown; options: unknown }>;
+  // When set, the next acceptSession/acceptNextSession rejects with this error.
+  nextAcceptSessionError?: unknown;
+  // Number of sessions acceptNextSession yields before it starts timing out.
+  sessionsAvailable: number;
+  // Last ServiceBusAdministrationClient instance + queue depth it reports.
+  adminArgs: unknown[];
+  queueDepth: number;
+  adminError?: unknown;
 } = {
   receivers: [],
   senders: [],
@@ -548,6 +929,12 @@ const sbHarness: {
   batchMaxMessages: undefined,
   nextSenderFailSend: undefined,
   nextReceiverFailReceive: undefined,
+  acceptSessionCalls: [],
+  nextAcceptSessionError: undefined,
+  sessionsAvailable: 0,
+  adminArgs: [],
+  queueDepth: 0,
+  adminError: undefined,
 };
 
 vi.mock("@azure/service-bus", () => {
@@ -577,11 +964,52 @@ vi.mock("@azure/service-bus", () => {
       sbHarness.senders.push(s);
       return s;
     }
+    async acceptSession(
+      queueName: unknown,
+      sessionId: unknown,
+      options?: unknown,
+    ): Promise<FakeReceiver> {
+      sbHarness.acceptSessionCalls.push({ queueName, sessionId, options });
+      if (sbHarness.nextAcceptSessionError !== undefined) {
+        const err = sbHarness.nextAcceptSessionError;
+        sbHarness.nextAcceptSessionError = undefined;
+        throw err;
+      }
+      const r = new FakeReceiver([sbHarness.receiveScript.shift() ?? []]);
+      sbHarness.receivers.push(r);
+      return r;
+    }
+    async acceptNextSession(queueName: unknown, options?: unknown): Promise<FakeReceiver> {
+      sbHarness.acceptSessionCalls.push({ queueName, sessionId: undefined, options });
+      if (sbHarness.nextAcceptSessionError !== undefined) {
+        const err = sbHarness.nextAcceptSessionError;
+        sbHarness.nextAcceptSessionError = undefined;
+        throw err;
+      }
+      if (sbHarness.sessionsAvailable <= 0) {
+        throw Object.assign(new Error("no session"), { code: "ServiceTimeout" });
+      }
+      sbHarness.sessionsAvailable -= 1;
+      const r = new FakeReceiver([sbHarness.receiveScript.shift() ?? []]);
+      sbHarness.receivers.push(r);
+      return r;
+    }
     async close(): Promise<void> {
       sbHarness.clientClosed = true;
     }
   }
-  return { ServiceBusClient };
+  class ServiceBusAdministrationClient {
+    constructor(...args: unknown[]) {
+      sbHarness.adminArgs = args;
+    }
+    async getQueueRuntimeProperties(): Promise<{ activeMessageCount: number }> {
+      if (sbHarness.adminError !== undefined) {
+        throw sbHarness.adminError;
+      }
+      return { activeMessageCount: sbHarness.queueDepth };
+    }
+  }
+  return { ServiceBusClient, ServiceBusAdministrationClient };
 });
 
 vi.mock("@azure/identity", () => {
@@ -611,6 +1039,12 @@ describe("AzureServiceBusBackend", () => {
     sbHarness.batchMaxMessages = undefined;
     sbHarness.nextSenderFailSend = undefined;
     sbHarness.nextReceiverFailReceive = undefined;
+    sbHarness.acceptSessionCalls = [];
+    sbHarness.nextAcceptSessionError = undefined;
+    sbHarness.sessionsAvailable = 0;
+    sbHarness.adminArgs = [];
+    sbHarness.queueDepth = 0;
+    sbHarness.adminError = undefined;
   });
 
   function makeAzure(): Promise<MessagingBackend> {
@@ -784,6 +1218,12 @@ describe("AzureServiceBusBackend close credential cleanup (azureBus.ts:202)", ()
     sbHarness.batchMaxMessages = undefined;
     sbHarness.nextSenderFailSend = undefined;
     sbHarness.nextReceiverFailReceive = undefined;
+    sbHarness.acceptSessionCalls = [];
+    sbHarness.nextAcceptSessionError = undefined;
+    sbHarness.sessionsAvailable = 0;
+    sbHarness.adminArgs = [];
+    sbHarness.queueDepth = 0;
+    sbHarness.adminError = undefined;
   });
 
   it("calls credential.close() when a credential with close() was created", async () => {
@@ -802,6 +1242,30 @@ describe("AzureServiceBusBackend close credential cleanup (azureBus.ts:202)", ()
     const spy = vi.spyOn(credential, "close");
     await b.close();
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("getQueueDepth reuses the data-plane credential instead of minting a new one (azure_bus.py:388)", async () => {
+    // Service-principal path: getQueueDepth must reuse this.credential (the same
+    // instance built for the data-plane client) rather than calling the
+    // credentialFactory again and leaking a fresh credential per call.
+    const b = await getQueue("azure_service_bus", {
+      fullyQualifiedNamespace: "ns.servicebus.windows.net",
+      queueName: "q",
+      tenantId: "t",
+      clientId: "c",
+      clientSecret: "s",
+    });
+    // Force lazy client creation so this.credential is populated.
+    await b.send({ x: 1 });
+    const credential = (b as unknown as { credential?: unknown }).credential;
+    expect(credential).toBeDefined();
+
+    sbHarness.queueDepth = 5;
+    expect(await b.getQueueDepth()).toBe(5);
+    // The admin client was constructed with [namespace, reusedCredential].
+    expect(sbHarness.adminArgs[0]).toBe("ns.servicebus.windows.net");
+    expect(sbHarness.adminArgs[1]).toBe(credential);
+    await b.close();
   });
 
   it("does not throw on close() when no credential is present (connection-string path)", async () => {
@@ -826,6 +1290,12 @@ describe("AzureServiceBusBackend sendBatch batchSize boundary (azureBus.ts:254)"
     sbHarness.batchMaxMessages = undefined;
     sbHarness.nextSenderFailSend = undefined;
     sbHarness.nextReceiverFailReceive = undefined;
+    sbHarness.acceptSessionCalls = [];
+    sbHarness.nextAcceptSessionError = undefined;
+    sbHarness.sessionsAvailable = 0;
+    sbHarness.adminArgs = [];
+    sbHarness.queueDepth = 0;
+    sbHarness.adminError = undefined;
   });
 
   function makeConn(): Promise<MessagingBackend> {
@@ -868,6 +1338,12 @@ describe("AzureServiceBusBackend message construction and mapping", () => {
     sbHarness.batchMaxMessages = undefined;
     sbHarness.nextSenderFailSend = undefined;
     sbHarness.nextReceiverFailReceive = undefined;
+    sbHarness.acceptSessionCalls = [];
+    sbHarness.nextAcceptSessionError = undefined;
+    sbHarness.sessionsAvailable = 0;
+    sbHarness.adminArgs = [];
+    sbHarness.queueDepth = 0;
+    sbHarness.adminError = undefined;
   });
 
   function makeAzure(): Promise<MessagingBackend> {
@@ -943,6 +1419,11 @@ describe("AzureServiceBusBackend message construction and mapping", () => {
         sequence_number: null,
         enqueued_time: "",
       },
+      // FIFO/session fields default to undefined; receiveCount is deliveryCount+1
+      // (delivery_count or 0, per Python).
+      groupId: undefined,
+      dedupId: undefined,
+      receiveCount: 1,
     });
     await b.close();
   });
@@ -1072,6 +1553,175 @@ describe("AzureServiceBusBackend message construction and mapping", () => {
     expect(err).toBeInstanceOf(MessagingError);
     expect((err as Error).message).toBe("settle failed");
     expect((err as Error).cause).toBe(cause);
+    await b.close();
+  });
+});
+
+describe("AzureServiceBusBackend sessions + nack + dead-letter + depth", () => {
+  beforeEach(() => {
+    sbHarness.receivers = [];
+    sbHarness.senders = [];
+    sbHarness.receiveScript = [];
+    sbHarness.lastClientArgs = [];
+    sbHarness.clientClosed = false;
+    sbHarness.failNextClientCreations = 0;
+    sbHarness.batchMaxMessages = undefined;
+    sbHarness.nextSenderFailSend = undefined;
+    sbHarness.nextReceiverFailReceive = undefined;
+    sbHarness.acceptSessionCalls = [];
+    sbHarness.nextAcceptSessionError = undefined;
+    sbHarness.sessionsAvailable = 0;
+    sbHarness.adminArgs = [];
+    sbHarness.queueDepth = 0;
+    sbHarness.adminError = undefined;
+  });
+
+  function makeConn(sessionEnabled = false): Promise<MessagingBackend> {
+    return getQueue("azure_service_bus", {
+      connectionString: "Endpoint=sb://ns.servicebus.windows.net/;Shared...",
+      queueName: "jobs",
+      sessionEnabled,
+    });
+  }
+
+  it("send requires groupId on a session-enabled queue and maps it to sessionId", async () => {
+    const b = await makeConn(true);
+    await expect(b.send({ a: 1 })).rejects.toBeInstanceOf(MessageSendError);
+
+    await b.send({ a: 1 }, 0, { groupId: "s1", dedupId: "d1" });
+    expect(sbHarness.senders[0].sent[0]).toEqual({
+      body: JSON.stringify({ a: 1 }),
+      sessionId: "s1",
+      messageId: "d1",
+    });
+    await b.close();
+  });
+
+  it("receive on a session queue accepts a specific session and surfaces FIFO fields", async () => {
+    const b = await makeConn(true);
+    sbHarness.sessionsAvailable = 1;
+    sbHarness.receiveScript = [
+      [
+        {
+          lockToken: "lt",
+          messageId: "mid",
+          body: JSON.stringify({ n: 1 }),
+          sessionId: "s1",
+          deliveryCount: 2,
+        },
+      ],
+    ];
+
+    const [msg] = await b.receive(1, 0, { groupId: "s1" });
+    expect(sbHarness.acceptSessionCalls[0]).toMatchObject({ queueName: "jobs", sessionId: "s1" });
+    expect(msg.groupId).toBe("s1");
+    expect(msg.dedupId).toBe("mid");
+    expect(msg.receiveCount).toBe(3);
+    await b.close();
+  });
+
+  it("receive on a session queue with no group accepts the next session", async () => {
+    const b = await makeConn(true);
+    sbHarness.sessionsAvailable = 1;
+    sbHarness.receiveScript = [[]];
+    await b.receive(1, 0);
+    expect(sbHarness.acceptSessionCalls[0]).toMatchObject({
+      queueName: "jobs",
+      sessionId: undefined,
+    });
+    await b.close();
+  });
+
+  it("receive returns [] when no session is available (ServiceTimeout)", async () => {
+    const b = await makeConn(true);
+    sbHarness.sessionsAvailable = 0; // acceptNextSession throws ServiceTimeout
+    const msgs = await b.receive(1, 0);
+    expect(msgs).toEqual([]);
+    await b.close();
+  });
+
+  it("receive with groupId on a non-session queue throws FeatureNotSupportedError", async () => {
+    const b = await makeConn(false);
+    await expect(b.receive(1, 0, { groupId: "s1" })).rejects.toBeInstanceOf(
+      FeatureNotSupportedError,
+    );
+    await b.close();
+  });
+
+  it("nack abandons the message and releases the receiver", async () => {
+    const b = await makeConn(false);
+    sbHarness.receiveScript = [[{ lockToken: "lt", messageId: "m", body: JSON.stringify({}) }]];
+    await b.receive(1, 0);
+    await b.nack("lt");
+    expect(sbHarness.receivers[0].abandoned).toHaveLength(1);
+    expect(sbHarness.receivers[0].closed).toBe(true);
+    // pending consumed
+    await expect(b.delete("lt")).rejects.toThrow(/No pending message/);
+    await b.close();
+  });
+
+  it("deadLetter dead-letters the message with the reason and releases the receiver", async () => {
+    const b = await makeConn(false);
+    sbHarness.receiveScript = [[{ lockToken: "lt", messageId: "m", body: JSON.stringify({}) }]];
+    await b.receive(1, 0);
+    await b.deadLetter("lt", "poison");
+    expect(sbHarness.receivers[0].deadLettered).toHaveLength(1);
+    expect(sbHarness.receivers[0].deadLettered[0].options).toEqual({
+      deadLetterReason: "poison",
+      deadLetterErrorDescription: "poison",
+    });
+    expect(sbHarness.receivers[0].closed).toBe(true);
+    await expect(b.deadLetter("lt", "again")).rejects.toThrow(/No pending message/);
+    await b.close();
+  });
+
+  it("nack with an unknown receipt handle throws MessagingError", async () => {
+    const b = await makeConn(false);
+    await expect(b.nack("ghost")).rejects.toBeInstanceOf(MessagingError);
+    await b.close();
+  });
+
+  it("getQueueDepth reads activeMessageCount via the administration client", async () => {
+    const b = await makeConn(false);
+    sbHarness.queueDepth = 17;
+    expect(await b.getQueueDepth()).toBe(17);
+    // connection-string path constructs the admin client with the connection string
+    expect(sbHarness.adminArgs[0]).toContain("Endpoint=sb://");
+    await b.close();
+  });
+
+  it("getQueueDepth maps an admin error to MessagingError", async () => {
+    const b = await makeConn(false);
+    sbHarness.adminError = new Error("admin boom");
+    await expect(b.getQueueDepth()).rejects.toBeInstanceOf(MessagingError);
+    await b.close();
+  });
+
+  it("receive on a non-session queue returns [] when receiveMessages times out (azure_bus.py:291)", async () => {
+    // The data-plane receive can itself time out (Python OperationTimeoutError).
+    // The JS SDK surfaces this as a ServiceBusError code ServiceTimeout; the
+    // backend must treat it as an empty poll, not an error.
+    const b = await makeConn(false);
+    sbHarness.nextReceiverFailReceive = Object.assign(new Error("recv timed out"), {
+      code: "ServiceTimeout",
+    });
+    const msgs = await b.receive(1, 0);
+    expect(msgs).toEqual([]);
+    // the receiver is still closed before returning.
+    expect(sbHarness.receivers[0].closed).toBe(true);
+    await b.close();
+  });
+
+  it("purge on a session queue drains sessions until none remain", async () => {
+    const b = await makeConn(true);
+    sbHarness.sessionsAvailable = 2;
+    // first session yields one batch then empties; second yields nothing.
+    sbHarness.receiveScript = [[{ lockToken: "a" }], []];
+    await b.purge();
+    // two sessions accepted + a third accept attempt that times out -> stop
+    expect(sbHarness.acceptSessionCalls).toHaveLength(3);
+    expect(sbHarness.receivers).toHaveLength(2);
+    expect(sbHarness.receivers.every((r) => r.closed)).toBe(true);
     await b.close();
   });
 });

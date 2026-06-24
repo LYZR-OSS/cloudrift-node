@@ -19,8 +19,14 @@ import { SecretBackend } from "../src/secrets/base.js";
 import {
   AWSSecretsManagerBackend,
   AzureKeyVaultBackend,
+  EnvSecretBackend,
+  FileSecretBackend,
+  MappingSecretBackend,
   getSecrets,
 } from "../src/secrets/index.js";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const smMock = mockClient(SecretsManagerClient);
 const credentialProviderMock = vi.hoisted(() => ({
@@ -766,6 +772,144 @@ describe("getSecrets factory dispatch", () => {
     await expect(
       getSecrets("gcp_secret_manager" as unknown as "aws_secrets_manager", {}),
     ).rejects.toThrow(/Unknown secrets provider/);
+  });
+});
+
+describe("EnvSecretBackend", () => {
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    for (const k of Object.keys(process.env)) {
+      if (!(k in saved)) delete process.env[k];
+    }
+    for (const [k, v] of Object.entries(saved)) {
+      process.env[k] = v;
+    }
+  });
+
+  it("dispatches via getSecrets('env') and reads with the prefix", async () => {
+    process.env.SECRET_db = "postgres://x";
+    const backend = (await getSecrets("env", { prefix: "SECRET_" })) as EnvSecretBackend;
+    expect(backend).toBeInstanceOf(EnvSecretBackend);
+    expect(await backend.getSecret("db")).toBe("postgres://x");
+  });
+
+  it("set/delete round-trips through the prefixed env var", async () => {
+    const backend = new EnvSecretBackend({ prefix: "PFX_" });
+    await backend.setSecret("token", "abc");
+    expect(process.env.PFX_token).toBe("abc");
+    expect(await backend.getSecret("token")).toBe("abc");
+    await backend.deleteSecret("token");
+    expect(process.env.PFX_token).toBeUndefined();
+  });
+
+  it("throws SecretNotFoundError for a missing var", async () => {
+    const backend = new EnvSecretBackend({ prefix: "MISS_" });
+    await expect(backend.getSecret("nope")).rejects.toBeInstanceOf(SecretNotFoundError);
+  });
+
+  it("listSecrets strips the prefix and filters by the argument", async () => {
+    process.env.S_alpha = "1";
+    process.env.S_beta = "2";
+    process.env.OTHER = "3";
+    const backend = new EnvSecretBackend({ prefix: "S_" });
+    expect(new Set(await backend.listSecrets())).toEqual(new Set(["alpha", "beta"]));
+    expect(await backend.listSecrets("al")).toEqual(["alpha"]);
+  });
+
+  it("getSecretJson parses a JSON env value", async () => {
+    process.env.J_cfg = JSON.stringify({ host: "h", port: 1 });
+    const backend = new EnvSecretBackend({ prefix: "J_" });
+    expect(await backend.getSecretJson("cfg")).toEqual({ host: "h", port: 1 });
+  });
+});
+
+describe("MappingSecretBackend", () => {
+  it("dispatches via getSecrets('memory') and getSecrets('local')", async () => {
+    const mem = await getSecrets("memory", { mapping: { a: "1" } });
+    expect(mem).toBeInstanceOf(MappingSecretBackend);
+    expect(await mem.getSecret("a")).toBe("1");
+
+    const local = await getSecrets("local", { mapping: { b: "2" } });
+    expect(local).toBeInstanceOf(MappingSecretBackend);
+    expect(await local.getSecret("b")).toBe("2");
+  });
+
+  it("copies the seed mapping and supports CRUD + prefix listing", async () => {
+    const seed = { "app/a": "1", "app/b": "2", "other/c": "3" };
+    const backend = new MappingSecretBackend({ mapping: seed });
+    // mutating the original seed must not leak in
+    seed["app/a"] = "mutated";
+    expect(await backend.getSecret("app/a")).toBe("1");
+
+    await backend.setSecret("app/d", "4");
+    expect(new Set(await backend.listSecrets("app/"))).toEqual(
+      new Set(["app/a", "app/b", "app/d"]),
+    );
+    await backend.deleteSecret("app/a");
+    await expect(backend.getSecret("app/a")).rejects.toBeInstanceOf(SecretNotFoundError);
+  });
+
+  it("defaults to an empty store", async () => {
+    const backend = new MappingSecretBackend();
+    expect(await backend.listSecrets()).toEqual([]);
+  });
+});
+
+describe("FileSecretBackend", () => {
+  let dir: string;
+  let path: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "cloudrift-secrets-"));
+    path = join(dir, "secrets.json");
+  });
+
+  it("dispatches via getSecrets('file') and persists set/get atomically", async () => {
+    const backend = (await getSecrets("file", { path })) as FileSecretBackend;
+    expect(backend).toBeInstanceOf(FileSecretBackend);
+    await backend.setSecret("db", "postgres://x");
+    // a fresh backend reads the persisted file
+    const reopened = new FileSecretBackend({ path });
+    expect(await reopened.getSecret("db")).toBe("postgres://x");
+    const onDisk = JSON.parse(await readFile(path, "utf-8"));
+    expect(onDisk).toEqual({ db: "postgres://x" });
+  });
+
+  it("a missing file reads as empty", async () => {
+    const backend = new FileSecretBackend({ path });
+    expect(await backend.listSecrets()).toEqual([]);
+    await expect(backend.getSecret("x")).rejects.toBeInstanceOf(SecretNotFoundError);
+  });
+
+  it("set/delete round-trip and prefix listing", async () => {
+    const backend = new FileSecretBackend({ path });
+    await backend.setSecret("app/a", "1");
+    await backend.setSecret("app/b", "2");
+    await backend.setSecret("other/c", "3");
+    expect(new Set(await backend.listSecrets("app/"))).toEqual(new Set(["app/a", "app/b"]));
+    await backend.deleteSecret("app/a");
+    expect(new Set(await backend.listSecrets())).toEqual(new Set(["app/b", "other/c"]));
+  });
+
+  it("throws SecretError when the file is not valid JSON", async () => {
+    await writeFile(path, "not json{", "utf-8");
+    const backend = new FileSecretBackend({ path });
+    await expect(backend.getSecret("x")).rejects.toBeInstanceOf(SecretError);
+    await expect(backend.getSecret("x")).rejects.toThrow(/unreadable/);
+  });
+
+  it("throws SecretError when the file is a JSON non-object", async () => {
+    await writeFile(path, JSON.stringify(["a", "b"]), "utf-8");
+    const backend = new FileSecretBackend({ path });
+    await expect(backend.listSecrets()).rejects.toBeInstanceOf(SecretError);
+    await expect(backend.listSecrets()).rejects.toThrow(/must contain a JSON object/);
+  });
+
+  it("getSecretJson parses a stored JSON string value", async () => {
+    const backend = new FileSecretBackend({ path });
+    await backend.setSecret("cfg", JSON.stringify({ host: "h" }));
+    expect(await backend.getSecretJson("cfg")).toEqual({ host: "h" });
   });
 });
 

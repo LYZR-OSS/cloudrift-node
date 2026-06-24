@@ -262,6 +262,16 @@ describe("StandaloneRedisBackend factory wiring", () => {
     await StandaloneRedisBackend.fromUrl({ url: "redis://localhost:6379/0" });
     expect("tls" in lastClient().options).toBe(false);
   });
+
+  it("threads decodeResponses onto the backend (default false)", async () => {
+    const def = await StandaloneRedisBackend.fromCredentials({ host: "h" });
+    expect((def as unknown as { decodeResponses: boolean }).decodeResponses).toBe(false);
+    const decoding = await StandaloneRedisBackend.fromCredentials({
+      host: "h",
+      decodeResponses: true,
+    });
+    expect((decoding as unknown as { decodeResponses: boolean }).decodeResponses).toBe(true);
+  });
 });
 
 describe("AWSElastiCacheBackend factory wiring", () => {
@@ -344,6 +354,18 @@ describe("AWSElastiCacheBackend factory wiring", () => {
     expect(refreshed).not.toBe("STALE_SENTINEL");
     expect(refreshed).toContain("Action=connect");
     expect(refreshed).toContain("my-cluster.abc.use1.cache.amazonaws.com:6379/?");
+  });
+
+  it("fromIamAuth threads decodeResponses onto the backend", async () => {
+    const backend = await AWSElastiCacheBackend.fromIamAuth({
+      host: "h.cache.amazonaws.com",
+      username: "u",
+      region: "us-east-1",
+      awsAccessKeyId: "AKIA",
+      awsSecretAccessKey: "secret",
+      decodeResponses: true,
+    });
+    expect((backend as unknown as { decodeResponses: boolean }).decodeResponses).toBe(true);
   });
 
   it("fromIamAuth honors explicit port and ssl:false (no tls)", async () => {
@@ -546,6 +568,15 @@ describe("AzureRedisCacheBackend factory wiring", () => {
 
     await fireClose(client, "entra-token-1");
     expect(client.options.password).toBe("entra-token-2");
+  });
+
+  it("fromManagedIdentity threads decodeResponses onto the backend", async () => {
+    const backend = await AzureRedisCacheBackend.fromManagedIdentity({
+      host: "h",
+      username: "u",
+      decodeResponses: true,
+    });
+    expect((backend as unknown as { decodeResponses: boolean }).decodeResponses).toBe(true);
   });
 
   it("fromManagedIdentity passes clientId to the credential and honors ssl:false", async () => {
