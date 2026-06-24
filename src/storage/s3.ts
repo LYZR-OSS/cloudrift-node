@@ -221,11 +221,12 @@ export class AWSS3Client {
   }
 
   async close(): Promise<void> {
-    if (this.clientPromise !== null) {
-      const client = await this.clientPromise;
+    const clientPromise = this.clientPromise;
+    this.clientPromise = null;
+    this._client = null;
+    if (clientPromise !== null) {
+      const client = await clientPromise;
       client.destroy();
-      this.clientPromise = null;
-      this._client = null;
     }
   }
 

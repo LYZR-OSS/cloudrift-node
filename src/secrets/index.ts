@@ -7,8 +7,10 @@ import {
   type AwsProfileOptions,
 } from "./awsSecretsManager.js";
 import { AzureKeyVaultBackend } from "./azureKeyvault.js";
+import { EnvSecretBackend, FileSecretBackend, MappingSecretBackend } from "./local.js";
 
 export { SecretBackend } from "./base.js";
+export { EnvSecretBackend, FileSecretBackend, MappingSecretBackend } from "./local.js";
 export {
   AWSSecretsManagerBackend,
   type AwsClientOptions,
@@ -18,11 +20,21 @@ export {
 } from "./awsSecretsManager.js";
 export { AzureKeyVaultBackend } from "./azureKeyvault.js";
 
-export type SecretsProvider = "aws_secrets_manager" | "azure_keyvault";
+export type SecretsProvider =
+  | "aws_secrets_manager"
+  | "azure_keyvault"
+  | "env"
+  | "file"
+  | "memory"
+  | "local";
 
 const SECRETS_PROVIDERS = [
   "aws_secrets_manager",
   "azure_keyvault",
+  "env",
+  "file",
+  "memory",
+  "local",
 ] as const satisfies readonly SecretsProvider[];
 
 /**
@@ -31,7 +43,9 @@ const SECRETS_PROVIDERS = [
  * Routes to the appropriate `from*` static constructor based on which
  * credential keys are present, mirroring `cloudrift-py` `get_secrets`.
  *
- * @param provider `"aws_secrets_manager"` or `"azure_keyvault"`.
+ * @param provider `"aws_secrets_manager"`, `"azure_keyvault"`, or a non-cloud
+ *   source — `"env"` (environment variables), `"file"` (a JSON file), or
+ *   `"memory"`/`"local"` (in-memory mapping, mainly dev/tests).
  * @param options  Provider-specific config.
  */
 export async function getSecrets(
@@ -39,6 +53,13 @@ export async function getSecrets(
   options: Record<string, unknown>,
 ): Promise<SecretBackend> {
   switch (normalizeChoice("secrets provider", provider, SECRETS_PROVIDERS)) {
+    case "env":
+      return new EnvSecretBackend(options as { prefix?: string });
+    case "file":
+      return new FileSecretBackend(options as unknown as { path: string });
+    case "memory":
+    case "local":
+      return new MappingSecretBackend(options as { mapping?: Record<string, string> });
     case "aws_secrets_manager":
       if ("awsAccessKeyId" in options) {
         return AWSSecretsManagerBackend.fromAccessKey(options as unknown as AwsAccessKeyOptions);

@@ -64,6 +64,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
   static async fromUrl(opts: {
     url: string;
     sslCaCerts?: string;
+    decodeResponses?: boolean;
   }): Promise<StandaloneRedisBackend> {
     try {
       const Redis = await loadRedis();
@@ -78,7 +79,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
         options: RedisOptionsLike,
       ) => RedisClientLike;
       const client = new RedisCtor(opts.url, options);
-      return new StandaloneRedisBackend(client);
+      return new StandaloneRedisBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to Redis: ${describe(e)}`, {
         cause: e,
@@ -100,6 +101,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
     db?: number;
     ssl?: boolean;
     sslCaCerts?: string;
+    decodeResponses?: boolean;
   }): Promise<StandaloneRedisBackend> {
     try {
       const Redis = await loadRedis();
@@ -114,7 +116,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
         options.tls = buildTls({ sslCaCerts: opts.sslCaCerts }) ?? {};
       }
       const client = new Redis(options);
-      return new StandaloneRedisBackend(client);
+      return new StandaloneRedisBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to Redis: ${describe(e)}`, {
         cause: e,
@@ -136,6 +138,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
     sslCertfile: string;
     sslKeyfile: string;
     sslCaCerts?: string;
+    decodeResponses?: boolean;
   }): Promise<StandaloneRedisBackend> {
     try {
       const Redis = await loadRedis();
@@ -153,7 +156,7 @@ export class StandaloneRedisBackend extends BaseRedisBackend {
       if (opts.password !== undefined) options.password = opts.password;
       if (opts.username !== undefined) options.username = opts.username;
       const client = new Redis(options);
-      return new StandaloneRedisBackend(client);
+      return new StandaloneRedisBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to Redis (mTLS): ${describe(e)}`, {
         cause: e,

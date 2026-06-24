@@ -24,6 +24,8 @@ const EXPECTED_EXPORTS = [
   "./secrets",
   "./pubsub",
   "./document",
+  "./email",
+  "./sql",
 ] as const;
 
 const PROVIDER_SDK_IMPORTS = [

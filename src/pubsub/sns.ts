@@ -172,11 +172,12 @@ export class AWSSNSBackend extends PubSubBackend {
   }
 
   override async close(): Promise<void> {
-    if (this.client !== undefined) {
-      this.client.destroy();
-      this.client = undefined;
-    }
+    const client = this.client;
+    this.client = undefined;
     this.ensuring = undefined;
+    if (client !== undefined) {
+      client.destroy();
+    }
   }
 
   // --------------------------------------------------------------------

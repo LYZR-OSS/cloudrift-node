@@ -60,6 +60,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
     port?: number;
     db?: number;
     ssl?: boolean;
+    decodeResponses?: boolean;
   }): Promise<AzureRedisCacheBackend> {
     try {
       const Redis = await loadRedis();
@@ -74,7 +75,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
         options.tls = {};
       }
       const client = new Redis(options);
-      return new AzureRedisCacheBackend(client);
+      return new AzureRedisCacheBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to Azure Cache for Redis: ${describe(e)}`, {
         cause: e,
@@ -96,6 +97,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
     db?: number;
     ssl?: boolean;
     clientId?: string;
+    decodeResponses?: boolean;
   }): Promise<AzureRedisCacheBackend> {
     try {
       const identity = await loadOptional<typeof import("@azure/identity")>(
@@ -134,6 +136,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
     port?: number;
     db?: number;
     ssl?: boolean;
+    decodeResponses?: boolean;
   }): Promise<AzureRedisCacheBackend> {
     try {
       const identity = await loadOptional<typeof import("@azure/identity")>(
@@ -170,6 +173,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
       port?: number;
       db?: number;
       ssl?: boolean;
+      decodeResponses?: boolean;
     },
     credential: TokenCredentialLike,
     label: string,
@@ -190,7 +194,7 @@ export class AzureRedisCacheBackend extends BaseRedisBackend {
       }
       const client = new Redis(options);
       attachEntraTokenRefresh(client, () => fetchEntraToken(credential));
-      return new AzureRedisCacheBackend(client);
+      return new AzureRedisCacheBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(
         `Failed to connect to Azure Cache for Redis (${label}): ${describe(e)}`,

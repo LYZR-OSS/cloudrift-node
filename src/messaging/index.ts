@@ -13,9 +13,25 @@ import {
   type AzureBusServicePrincipalOptions,
 } from "./azureBus.js";
 
-export { type Message, MessagingBackend } from "./base.js";
-export { AWSSQSBackend } from "./sqs.js";
-export { AzureServiceBusBackend } from "./azureBus.js";
+export {
+  type Message,
+  type SendOptions,
+  type SendBatchOptions,
+  type ReceiveOptions,
+  MessagingBackend,
+} from "./base.js";
+export {
+  AWSSQSBackend,
+  type SqsAccessKeyOptions,
+  type SqsIamRoleOptions,
+  type SqsProfileOptions,
+} from "./sqs.js";
+export {
+  AzureServiceBusBackend,
+  type AzureBusConnectionStringOptions,
+  type AzureBusManagedIdentityOptions,
+  type AzureBusServicePrincipalOptions,
+} from "./azureBus.js";
 
 export type QueueProvider = "sqs" | "azure_service_bus";
 

@@ -175,6 +175,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
     db?: number;
     ssl?: boolean;
     sslCaCerts?: string;
+    decodeResponses?: boolean;
   }): Promise<AWSElastiCacheBackend> {
     try {
       const Redis = await loadRedis();
@@ -189,7 +190,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
         options.tls = buildTls({ sslCaCerts: opts.sslCaCerts }) ?? {};
       }
       const client = new Redis(options);
-      return new AWSElastiCacheBackend(client);
+      return new AWSElastiCacheBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to ElastiCache: ${describe(e)}`, {
         cause: e,
@@ -218,6 +219,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
     awsSecretAccessKey?: string;
     awsSessionToken?: string;
     profileName?: string;
+    decodeResponses?: boolean;
   }): Promise<AWSElastiCacheBackend> {
     try {
       const Redis = await loadRedis();
@@ -254,7 +256,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
       }
       const client = new Redis(options);
       attachIamTokenRefresh(client, genToken);
-      return new AWSElastiCacheBackend(client);
+      return new AWSElastiCacheBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to ElastiCache (IAM): ${describe(e)}`, {
         cause: e,
@@ -275,6 +277,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
     sslCertfile: string;
     sslKeyfile: string;
     sslCaCerts?: string;
+    decodeResponses?: boolean;
   }): Promise<AWSElastiCacheBackend> {
     try {
       const Redis = await loadRedis();
@@ -291,7 +294,7 @@ export class AWSElastiCacheBackend extends BaseRedisBackend {
       };
       if (opts.authToken !== undefined) options.password = opts.authToken;
       const client = new Redis(options);
-      return new AWSElastiCacheBackend(client);
+      return new AWSElastiCacheBackend(client, opts.decodeResponses ?? false);
     } catch (e) {
       throw new CacheConnectionError(`Failed to connect to ElastiCache (mTLS): ${describe(e)}`, {
         cause: e,

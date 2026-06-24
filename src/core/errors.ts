@@ -65,6 +65,13 @@ export class MessageSendError extends MessagingError {
   }
 }
 
+export class FeatureNotSupportedError extends MessagingError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "FeatureNotSupportedError";
+  }
+}
+
 /* ---- document ---- */
 
 export class DocumentConnectionError extends CloudRiftError {
@@ -140,5 +147,65 @@ export class PublishError extends PubSubError {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = "PublishError";
+  }
+}
+
+/* ---- sql ---- */
+
+export class SQLError extends CloudRiftError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SQLError";
+  }
+}
+
+export class SQLConnectionError extends SQLError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SQLConnectionError";
+  }
+}
+
+export class SQLAuthError extends SQLError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SQLAuthError";
+  }
+}
+
+/* ---- email ---- */
+
+export class EmailError extends CloudRiftError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "EmailError";
+  }
+}
+
+export class EmailSendError extends EmailError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "EmailSendError";
+  }
+}
+
+export class RecipientRejectedError extends EmailError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "RecipientRejectedError";
+  }
+}
+
+export class SenderUnverifiedError extends EmailError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SenderUnverifiedError";
+  }
+}
+
+export class EmailThrottledError extends EmailError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "EmailThrottledError";
   }
 }
