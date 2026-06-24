@@ -6,10 +6,24 @@ on:
       - main
   pull_request: {}
 
+# Least privilege: these jobs only read the repo and run checks.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. a PR force-push) to save minutes.
+concurrency:
+  group: build-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
-    name: CI / build_check
+    name: CI / build_check (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines requires Node >=20; prove both the LTS floor and current.
+        node: ["20", "22"]
 
     steps:
       - name: Checkout
@@ -18,7 +32,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies
@@ -38,3 +52,37 @@ jobs:
 
       - name: Tests
         run: npm test
+
+      # Single-shot steps (run once, on the current Node line only).
+      - name: Coverage
+        if: matrix.node == '22'
+        run: npx vitest run --coverage --coverage.reporter=text-summary
+
+      - name: Audit dependencies
+        if: matrix.node == '22'
+        run: npm audit --audit-level=high --omit=dev
+
+  # Integration lane against LocalStack via testcontainers. Docker is preinstalled
+  # on GitHub-hosted ubuntu runners. Gated off normal PRs (cold image pulls add
+  # ~1-2 min) — runs on pushes to main and on PRs labelled "run-emulator".
+  emulator:
+    name: CI / aws-emulator
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-emulator')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: AWS emulator tests
+        run: npm run test:aws:emulator
