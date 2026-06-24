@@ -4,6 +4,10 @@
   "description": "Cloud-agnostic infrastructure abstraction library for Lyzr microservices (TypeScript port).",
   "type": "module",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LYZR-OSS/cloudrift-node.git"
+  },
   "engines": {
     "node": ">=20"
   },
