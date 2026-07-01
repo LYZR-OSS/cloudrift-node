@@ -200,7 +200,7 @@
     "@smithy/signature-v4": "^5.3.0",
     "@testcontainers/localstack": "^10.28.0",
     "@types/ioredis-mock": "^8.2.7",
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.0.1",
     "@types/nodemailer": "^6.4.0",
     "@types/pg": "^8.11.0",
     "aws-sdk-client-mock": "^4.1.0",
